@@ -21,13 +21,14 @@ from manifold3d import CrossSection, Manifold
 # ----------------------------------------------------------------- parametry
 FRAME_L = 90.0       # delka ramu (osa X) - bandaz siroky ~50 mm se vejde s rezervou
 FRAME_W = 80.0       # sirka ramu (osa Y) - urcuje obvod navinuti
-FRAME_T = 14.0       # tloustka ramu (osa Z)
+FRAME_T = 6.0        # tloustka ramu (osa Z) - tenky ram => z wrapu je plochy balicek, ne valec
 RIM = 8.0            # sirka okraje ramu
 RIB = 7.0            # sirka zeber uvnitr ramu
-EDGE_R = 4.0         # zaobleni dlouhych hran (aby se bandaz nezadrhaval)
+EDGE_R = 2.5         # zaobleni dlouhych hran (aby se bandaz nezadrhaval)
 CORNER_R = 10.0      # zaobleni rohu v pudorysu
 WIN_R = 4.0          # zaobleni oken
 
+PAD_W = 14.0         # sirka podlozky (zesileni) pod cepem na okraji ramu
 PIN_D = 8.0          # prumer cepu
 CLR = 0.5            # radialni vule rukojeti/kliky na cepu (u hrubsich trysek zvys na 0.6)
 GAP_X = 0.6          # osova vule
@@ -43,7 +44,8 @@ CRANK_R = 30.0       # polomer kliky od osy otaceni (Y)
 
 SEG = 96             # rozliseni valcu
 
-Z0 = FRAME_T / 2     # osa otaceni lezi ve vysce stredu ramu
+Z0 = FRAME_T / 2     # stred tloustky ramu
+AX_Z = 7.0           # vyska osy cepu nad podlozkou (otvor objimky se musi vejit nad Z=0)
 
 
 def to_x(m: Manifold) -> Manifold:
@@ -65,6 +67,12 @@ def rounded_rect_xs(w, h, r):
     return cs.offset(r, m3d.JoinType.Round, 2.0, SEG // 2)
 
 
+def outline_prism(h):
+    """Pudorys ramu (zaoblene rohy) vytlaceny do vysky h."""
+    outline = rounded_rect_xs(FRAME_L, FRAME_W, CORNER_R)
+    return Manifold.extrude(outline, h).translate([FRAME_L / 2, 0, 0])
+
+
 def build_frame() -> Manifold:
     # tyc s plne zaoblenymi dlouhymi hranami (profil v YZ vytlacen podel X)
     prof = rounded_rect_xs(FRAME_T, FRAME_W, EDGE_R)       # x->Z, y->Y
@@ -72,9 +80,7 @@ def build_frame() -> Manifold:
     bar = bar.translate([0, 0, Z0])
 
     # zaobleni rohu v pudorysu
-    outline = rounded_rect_xs(FRAME_L, FRAME_W, CORNER_R)
-    outline = Manifold.extrude(outline, FRAME_T).translate([FRAME_L / 2, 0, 0])
-    frame = bar ^ outline  # intersection
+    frame = bar ^ outline_prism(FRAME_T)  # intersection
 
     # okna 3 x 2, uprostred podelne zebro
     inner_x0, inner_x1 = RIM, FRAME_L - RIM
@@ -100,21 +106,26 @@ def build_axle(x_face, direction, y, sleeve_l, outer_d):
     """
     s = direction
     pin_r = PIN_D / 2
-    # cep: zapusten 2 mm do ramu, kuzelovy naběh, valec, hlava
-    embed = 2.0
-    fillet = cyl_x(x_face - s * embed, s * (embed + FILLET_L), HEAD_D / 2, y, Z0, pin_r)
+    # podlozka: ram je tenky, osa cepu je vyssi -> okraj ramu se pod cepem
+    # lokalne zvysi na prumer hlavy (pevne uchyceni cepu)
+    pad = Manifold.cube([RIM, PAD_W, HEAD_D]).translate(
+        [min(x_face, x_face - s * RIM), y - PAD_W / 2, 0])
+    pad = pad ^ outline_prism(HEAD_D)
+    # cep: zapusten do podlozky, kuzelovy naběh, valec, hlava
+    embed = 0.5
+    fillet = cyl_x(x_face - s * embed, s * (embed + FILLET_L), HEAD_D / 2, y, AX_Z, pin_r)
     x = x_face + s * FILLET_L
     sleeve_start = x + s * GAP_X
     sleeve_end = sleeve_start + s * sleeve_l
     head_start = sleeve_end + s * GAP_X
-    pin = cyl_x(x_face, head_start - x_face, pin_r, y, Z0)
-    head = cyl_x(head_start, s * HEAD_L, HEAD_D / 2, y, Z0)
-    pin_all = fillet + pin + head
+    pin = cyl_x(x_face, head_start - x_face, pin_r, y, AX_Z)
+    head = cyl_x(head_start, s * HEAD_L, HEAD_D / 2, y, AX_Z)
+    pin_all = pad + fillet + pin + head
 
     # objimka: vnejsi valec tecny k podlozce (Z=0), otvor soustredny s cepem
     outer_r = outer_d / 2
     outer = cyl_x(sleeve_start, s * sleeve_l, outer_r, y, outer_r)
-    bore = cyl_x(sleeve_start - s * 1, s * (sleeve_l + 2), pin_r + CLR, y, Z0)
+    bore = cyl_x(sleeve_start - s * 1, s * (sleeve_l + 2), pin_r + CLR, y, AX_Z)
     sleeve = outer - bore
     return pin_all, sleeve
 
