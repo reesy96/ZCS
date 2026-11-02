@@ -1,0 +1,126 @@
+\documentclass[preprint,12pt]{elsarticle}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[table]{xcolor}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{geometry}
+\graphicspath{{figures/}}
+% vlastní makra
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\vect}[1]{\boldsymbol{#1}}
+\DeclareMathOperator{\argmin}{arg\,min}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\journal{Sensors and Actuators A}
+
+\begin{document}
+\begin{frontmatter}
+\title{Fibre Bragg Grating Sensors for Wrist Rehabilitation Monitoring\tnoteref{t1}}
+\tnotetext[t1]{This work was supported by grant XY-123.}
+
+\author[cvut]{Jan Nov\'ak\corref{cor1}}
+\ead{jan.novak@fel.cvut.cz}
+\author[cvut,vsb]{Petra Dvo\v{r}\'akov\'a}
+\ead{petra.dvorakova@vsb.cz}
+\author[vsb]{John Smith}
+\cortext[cor1]{Corresponding author}
+
+\affiliation[cvut]{organization={Faculty of Electrical Engineering, Czech Technical University in Prague},
+            addressline={Technická 2},
+            city={Prague},
+            postcode={166 27},
+            country={Czech Republic}}
+\affiliation[vsb]{organization={VŠB -- Technical University of Ostrava},
+            city={Ostrava},
+            country={Czech Republic}}
+
+\begin{abstract}
+We present a wearable sensing system based on fibre Bragg gratings (FBG) for
+monitoring wrist flexion during rehabilitation. The sensor achieves a resolution
+of \SI{0.5}{\degree} and was validated on 12 participants.
+\end{abstract}
+
+\begin{highlights}
+\item FBG sensor embedded in a flexible glove
+\item Resolution of 0.5 degree
+\end{highlights}
+
+\begin{keyword}
+fibre Bragg grating \sep rehabilitation \sep wearable sensors \sep optical fibre
+\PACS 42.81.Pa
+\end{keyword}
+\end{frontmatter}
+
+\section{Introduction}
+\label{sec:intro}
+Optical fibre sensors are immune to electromagnetic interference \citep{kersey1997,othonos1997}.
+As shown by \citet{kersey1997}, FBGs can measure strain. % komentář v těle
+Let $\vect{x}\in\R^n$ and consider $\argmin_{\vect{x}} f(\vect{x})$.
+
+\section{Methods}
+\subsection{Sensor design}
+The sensor is shown in Fig.~\ref{fig:sensor}.
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{sensor}
+  \caption{Schematic of the FBG sensor.}
+  \label{fig:sensor}
+\end{figure}
+
+\begin{theorem}\label{thm:a}
+The Bragg wavelength shifts linearly with strain.
+\end{theorem}
+\begin{lemma}
+Temperature compensation is needed.
+\end{lemma}
+
+\begin{table}[ht]
+\centering
+\caption{Measured parameters.}\label{tab:par}
+\begin{tabular}{lcc}
+\toprule
+Parameter & Value & Unit\\
+\midrule
+Sensitivity & 1.2 & pm/$\mu\varepsilon$\\
+Resolution & 0.5 & deg\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{equation}
+\Delta\lambda_B = \lambda_B (1-p_e)\varepsilon
+\label{eq:bragg}
+\end{equation}
+
+\section{Results}
+Results are summarized in Fig.~\ref{fig:res} and Table~\ref{tab:par}, see also \url{https://example.org}.
+\begin{figure}[ht]
+\centering
+\begin{subfigure}{0.45\textwidth}
+\includegraphics[width=\linewidth]{results}
+\caption{A}
+\end{subfigure}
+\begin{subfigure}{0.45\textwidth}
+\includegraphics[width=\linewidth]{figures/results.png}
+\caption{B}
+\end{subfigure}
+\caption{Results.}\label{fig:res}
+\end{figure}
+
+\section{Conclusions}
+FBG sensors are suitable for rehabilitation.
+
+\section*{Acknowledgements}
+We thank the volunteers who participated in the study.
+
+\appendix
+\section{Calibration data}
+Additional data are given here.
+
+\bibliographystyle{elsarticle-num}
+\bibliography{refs}
+\end{document}
