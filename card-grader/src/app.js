@@ -195,6 +195,7 @@ function renderQuality() {
   const issues = [...q.issues.map(i => ({ ...i, text: (qb ? 'Přední: ' : '') + i.text })), ...(qb ? qb.issues.map(i => ({ ...i, text: 'Zadní: ' + i.text })) : [])];
   const box = $('#quality');
   const ok = q.ok && (!qb || qb.ok);
+  $('#results').classList.toggle('nograde', !ok);
   if (!issues.length) { box.hidden = true; $('#grades-block').hidden = false; return; }
   box.hidden = false; box.className = 'quality ' + (ok ? 'warn' : 'fail');
   box.innerHTML = `<b>${ok ? '⚠️ Snímek má nedostatky – známka je jen orientační' : '⛔ Snímek nestačí na spolehlivé hodnocení'}</b><ul>${issues.map(i => `<li class="${i.level}">${i.text}</li>`).join('')}</ul>` +

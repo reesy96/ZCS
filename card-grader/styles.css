@@ -90,3 +90,4 @@ footer { text-align: center; padding: 10px 16px 24px; }
 .quality li.warn { color: var(--warn); }
 .quality p { margin: 8px 0 0; font-size: 14px; color: var(--muted); }
 .possible { opacity: .75; }
+.results.nograde .grade-only, .results.nograde .note { display: none; }
