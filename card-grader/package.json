@@ -1,0 +1,11 @@
+{
+  "name": "pokemon-card-grader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline PWA that photographs a Pokémon TCG card, finds defects and estimates PSA/BGS/CGC/EU grades.",
+  "scripts": {
+    "test": "node test/run.js",
+    "serve": "python3 -m http.server 8080"
+  }
+}
