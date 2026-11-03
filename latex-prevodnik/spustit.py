@@ -52,7 +52,9 @@ def cli(args):
         for w in r["warnings"]:
             print("  ! " + w)
         c = res.get("compile")
-        if c:
+        if c and c.get("no_tex"):
+            print("Překlad: LaTeX nenalezen — PDF si přelož sám (Overleaf, MiKTeX).")
+        elif c:
             print("Překlad: " + ("OK" if c["ok"] else "s chybami" if c["pdf"] else "nepodařil se"))
             for e in c["errors"][:5]:
                 print("    " + e.replace("\n", "\n    "))

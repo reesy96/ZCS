@@ -158,7 +158,11 @@ def result_page(jid: str, res: dict):
              f"<div class='card row'><a class='btn' href='/job/{jid}/download'>Stáhnout výsledek (ZIP)</a>"
              f"<a class='btn sec' href='/job/{jid}'>← Upravit údaje a převést znovu</a><a class='btn sec' href='/'>Nový převod</a></div>"]
     if c:
-        if c["ok"]:
+        if c.get("no_tex"):
+            parts.append("<div class='card'><b>PDF jsem nevytvořil — na tomto počítači není nainstalovaný LaTeX.</b> "
+                         "Převod sám proběhl; stáhni ZIP a přelož ho v Overleafu (nahraj ZIP jako nový projekt) "
+                         "nebo si nainstaluj <a href='https://miktex.org/download'>MiKTeX</a> a aplikaci spusť znovu.</div>")
+        elif c["ok"]:
             parts.append("<div class='card ok'><b>Zkušební překlad proběhl bez chyb.</b></div>")
         elif c["pdf"]:
             parts.append("<div class='card warn'><b>PDF vzniklo, ale překlad hlásil chyby</b> — viz níže.</div>")

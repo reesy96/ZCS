@@ -64,7 +64,8 @@ def run(art: Article, src_dir: Path, tpl_dir: Path, out_dir: Path, src_main_rel=
         engine = "xelatex" if art.uses_fontspec else "pdflatex"
         c = compile_tex(main_out, engine)
         result["compile"] = {"ok": c["ok"], "pdf": c["pdf"].name if c["pdf"] else None, "errors": c["errors"],
-                             "tool": c["tool"], "log_tail": c["log_tail"], "undefined": c.get("undefined", [])}
+                             "tool": c["tool"], "log_tail": c["log_tail"], "undefined": c.get("undefined", []),
+                             "no_tex": c.get("no_tex", False)}
     write_report(out_dir, art, result)
     return result
 
@@ -82,7 +83,9 @@ def write_report(out_dir: Path, art: Article, result: dict):
         if items:
             lines += ["", "## " + title, ""] + ["- " + i.replace("\n", " ") for i in items]
     c = result.get("compile")
-    if c:
+    if c and c.get("no_tex"):
+        lines += ["", "## Zkušební překlad", "", "LaTeX na počítači nebyl nalezen — PDF si přelož sám (Overleaf, TeXstudio, MiKTeX)."]
+    elif c:
         lines += ["", "## Zkušební překlad", "", f"Nástroj: {c['tool']}", "Výsledek: " + ("OK" if c["ok"] else ("PDF vzniklo, ale s chybami" if c["pdf"] else "nepodařilo se"))]
         for e in c["errors"]:
             lines += ["", "```", e, "```"]

@@ -28,13 +28,18 @@ def compile_tex(main: Path, engine: str = "pdflatex", timeout: int = 240):
     avail = tex_available()
     cwd = main.parent
     name = main.name
-    res = {"ok": False, "pdf": None, "errors": [], "tool": None, "log_tail": ""}
+    res = {"ok": False, "pdf": None, "errors": [], "tool": None, "log_tail": "", "no_tex": False}
+    log = cwd / (main.stem + ".log")
+    out = ""
+    used_latexmk = False
     if avail.get("latexmk"):
         flag = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}[engine]
         cmd = ["latexmk", flag, "-interaction=nonstopmode", "-file-line-error", "-f", name]
         res["tool"] = "latexmk " + flag
         code, out = _run(cmd, cwd, timeout)
-    elif avail.get(engine):
+        # MiKTeX: latexmk potřebuje Perl; bez něj se nic nepřeloží → zkusíme pdflatex přímo
+        used_latexmk = log.exists()
+    if not used_latexmk and avail.get(engine):
         res["tool"] = engine + " + bibtex"
         out = ""
         base = [engine, "-interaction=nonstopmode", "-file-line-error", name]
@@ -50,10 +55,9 @@ def compile_tex(main: Path, engine: str = "pdflatex", timeout: int = 240):
         for _ in range(2):
             code, o = _run(base, cwd, timeout)
             out += o
-    else:
-        res["errors"].append("Na tomto počítači jsem nenašel LaTeX (latexmk ani pdflatex). Výsledek si přelož ve svém editoru (TeXstudio, Overleaf…).")
+    elif not used_latexmk:
+        res["no_tex"] = True
         return res
-    log = cwd / (main.stem + ".log")
     logtxt = log.read_text(errors="replace") if log.exists() else out
     res["errors"] = parse_errors(logtxt)
     pdf = cwd / (main.stem + ".pdf")
