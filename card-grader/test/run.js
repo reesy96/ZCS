@@ -1,5 +1,7 @@
 // Test suite: synthetic cards with known defects must be detected and graded sensibly.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+fs.mkdirSync(new URL('./out/', import.meta.url).pathname, { recursive: true });
 import { makeCard, embedInScene, writePNG } from './synth.js';
 import { rectifyCard, detectCardQuad, CARD_W, CARD_H } from '../src/cardDetect.js';
 import { analyzeSide } from '../src/analyzers.js';
