@@ -80,3 +80,13 @@ footer { text-align: center; padding: 10px 16px 24px; }
 .live-bar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px calc(14px + env(safe-area-inset-bottom)); background: #000; }
 .shutter { width: 68px; height: 68px; border-radius: 50%; border: 5px solid #fff; background: var(--accent); }
 @media (max-width: 420px) { .summary { grid-template-columns: 1fr; } .sub { grid-template-columns: 90px 1fr 36px; } }
+
+.quality { border-radius: 12px; padding: 12px; margin-bottom: 12px; border: 1px solid var(--line); background: var(--panel2); }
+.quality.fail { border-color: var(--bad); }
+.quality.warn { border-color: var(--warn); }
+.quality b { display: block; margin-bottom: 6px; }
+.quality ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.quality li.fail { color: var(--bad); }
+.quality li.warn { color: var(--warn); }
+.quality p { margin: 8px 0 0; font-size: 14px; color: var(--muted); }
+.possible { opacity: .75; }

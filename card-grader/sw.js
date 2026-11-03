@@ -1,9 +1,9 @@
 // Offline-first service worker: caches the app shell so the grader works without a network.
-const CACHE = 'card-grader-v1';
+const CACHE = 'card-grader-v2';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './src/app.js', './src/worker.js', './src/imgproc.js', './src/cardDetect.js', './src/analyzers.js',
-  './src/grading.js', './src/recommend.js', './src/report.js',
+  './src/grading.js', './src/recommend.js', './src/report.js', './src/quality.js', './src/pack.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',
 ];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });

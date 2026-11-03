@@ -6,7 +6,9 @@ import { analyzeSide } from '../src/analyzers.js';
 import { computeGrades, whatIf } from '../src/grading.js';
 import { recommendGrader } from '../src/recommend.js';
 import { buildTextReport } from '../src/report.js';
-import { toGray } from '../src/imgproc.js';
+import { toGray, resizeRGBA } from '../src/imgproc.js';
+import { assessQuality } from '../src/quality.js';
+import { packResult } from '../src/pack.js';
 
 const results = [];
 function test(name, fn) {
@@ -83,7 +85,7 @@ test('crease crossing the border caps the grade (Played at best)', () => {
 });
 
 test('dent on the border is detected', () => {
-  const r = analyzeSide(makeCard({ seed: 10, defects: [{ type: 'dent', x: 18, y: 500, radius: 18, strength: 35 }] }));
+  const r = analyzeSide(makeCard({ seed: 10, defects: [{ type: 'dent', x: 18, y: 500, radius: 18, strength: 60 }] }));
   const dn = r.defects.filter(d => d.type === 'dent');
   assert.ok(dn.length >= 1, `no dent; defects=${types(r)}`);
   assert.ok(Math.abs(dn[0].box.y + dn[0].box.h / 2 - 500) < 25, `dent y=${dn[0].box.y}`);
@@ -136,12 +138,26 @@ test('grader recommendation follows era/rarity rules', () => {
 });
 
 test('text report renders', () => {
-  const r = analyzeSide(makeCard({ seed: 14, defects: [{ type: 'corner', corner: 'tr', radius: 20 }, { type: 'dent', x: 400, y: 1030, radius: 16, strength: 30 }] }));
+  const r = analyzeSide(makeCard({ seed: 14, defects: [{ type: 'corner', corner: 'tr', radius: 20 }, { type: 'dent', x: 400, y: 1030, radius: 16, strength: 60 }] }));
   const g = grade(r);
   const w = whatIf(r.defects, { front: { lr: r.frame.lr, tb: r.frame.tb } }, g);
   const rep = buildTextReport({ meta: { name: 'Charizard' }, grades: g, defects: r.defects, whatIfs: w, recommendation: recommendGrader({ era: 'vintage', rarity: 'holo', grades: g }) });
   assert.ok(rep.includes('Charizard') && rep.includes('DOPORUČENÝ GRADER'));
   console.log('\n' + rep.split('\n').map(l => '    ' + l).join('\n') + '\n');
+});
+
+test('quality gate: small or blurry card is refused, good photo passes', () => {
+  const card = makeCard({ seed: 31 });
+  const good = embedInScene(card, { W: 1500, H: 2000 }).scene;
+  const rg = rectifyCard(good); const qg = assessQuality(packResult(rg, analyzeSide(rg.card)), { era: 'ex', sideName: 'front' });
+  assert.ok(qg.ok, 'good photo should pass: ' + JSON.stringify(qg.issues));
+  const far = embedInScene(card, { W: 1500, H: 2000, scale: 0.75 }).scene;
+  const small = resizeRGBA(far, 400, 533); // card ~ 260 px wide in the source
+  const rs = rectifyCard(small); const qs = assessQuality(packResult(rs, analyzeSide(rs.card)), { era: 'ex', sideName: 'front' });
+  assert.ok(!qs.ok && qs.issues.some(i => i.code === 'too-small'), 'small card should fail: ' + JSON.stringify(qs.issues));
+  // Back side of a yellow-border era has no frame and must not be flagged for it.
+  const qb = assessQuality(packResult(rg, { ...analyzeSide(rg.card, 'back'), frame: { valid: false } }), { era: 'ex', sideName: 'back' });
+  assert.ok(!qb.issues.some(i => i.code === 'no-frame'));
 });
 
 console.log(`\n${results.filter(r => r[1] === 'OK').length}/${results.length} tests passed`);

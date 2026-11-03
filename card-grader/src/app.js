@@ -1,6 +1,7 @@
 // UI glue for the Card Grader PWA.
 import { ERAS, RARITIES, recommendGrader } from './recommend.js';
-import { computeGrades, whatIf, EU_SCALE } from './grading.js';
+import { computeGrades, whatIf, EU_SCALE, usableDefect } from './grading.js';
+import { assessQuality } from './quality.js';
 import { DEFECT_NAMES, severityWord, confidenceWord, defectSentence, whatIfSentence, summaryLine, buildTextReport } from './report.js';
 
 const $ = (s) => document.querySelector(s);
@@ -170,7 +171,10 @@ function grade() {
   const centering = { front: { lr: f.frame.lr, tb: f.frame.tb, confidence: f.frame.confidence } };
   if (b && b.frame.valid) centering.back = { lr: b.frame.lr, tb: b.frame.tb, confidence: b.frame.confidence };
   state.defects = defects;
+  state.quality = { front: assessQuality(f, { era: $('#era').value, sideName: 'front' }), back: b ? assessQuality(b, { era: $('#era').value, sideName: 'back' }) : null };
   state.grades = computeGrades(defects, centering);
+  const qf = state.quality.front.score * (state.quality.back ? Math.max(0.6, state.quality.back.score) : 1);
+  state.grades.confidence = Math.max(0.1, state.grades.confidence * qf);
   state.whatIfs = whatIf(defects, centering, state.grades);
   state.recommendation = recommendGrader({ era: $('#era').value, rarity: $('#rarity').value, grades: state.grades });
 }
@@ -186,16 +190,26 @@ const FILTERS = [
   ['corners', 'Rohy 4×', 'Čtyři rohy zvětšené 4×, whitening podbarven červeně.'],
   ['defects', 'Vady', 'Všechny nalezené vady vyznačené na kartě.'],
 ];
+function renderQuality() {
+  const q = state.quality.front, qb = state.quality.back;
+  const issues = [...q.issues.map(i => ({ ...i, text: (qb ? 'Přední: ' : '') + i.text })), ...(qb ? qb.issues.map(i => ({ ...i, text: 'Zadní: ' + i.text })) : [])];
+  const box = $('#quality');
+  const ok = q.ok && (!qb || qb.ok);
+  if (!issues.length) { box.hidden = true; $('#grades-block').hidden = false; return; }
+  box.hidden = false; box.className = 'quality ' + (ok ? 'warn' : 'fail');
+  box.innerHTML = `<b>${ok ? '⚠️ Snímek má nedostatky – známka je jen orientační' : '⛔ Snímek nestačí na spolehlivé hodnocení'}</b><ul>${issues.map(i => `<li class="${i.level}">${i.text}</li>`).join('')}</ul>` +
+    (ok ? '' : '<p>Známky jsem proto schoval, aby nemátly. Níže vidíš, co detektor našel; vyfoť kartu znovu podle tipů a spusť analýzu znovu.</p>');
+  $('#grades-block').hidden = !ok;
+}
 function render() {
   const g = state.grades;
+  renderQuality();
   $('#eu-grade').textContent = `${g.eu.grade} (${g.eu.short})`;
   $('#psa-grade').textContent = g.psa.label; $('#bgs-grade').textContent = g.bgs.label; $('#cgc-grade').textContent = g.cgc.label;
   $('#summary-line').textContent = summaryLine(g);
   const f = state.results.front;
   const warn = [];
-  if (!f.detected) warn.push('Kartu se nepodařilo najít na pozadí – použit celý snímek.');
-  if (f.glareFrac > 0.01) warn.push('Na snímku je odlesk (přepal), to snižuje spolehlivost detekce škrábanců.');
-  if (!f.frame.valid) warn.push('Vnitřní rámeček nenalezen (full-art karta?), centrování nelze změřit.');
+  if (!f.frame.valid && !state.quality.front.issues.some(i => i.code === 'no-frame')) warn.push('Vnitřní rámeček nenalezen (full-art karta?), centrování nelze změřit.');
   $('#confidence-line').textContent = `Jistota odhadu: ${confidenceWord(g.confidence)} (${Math.round(g.confidence * 100)} %). ${warn.join(' ')}`;
 
   const subs = $('#subgrades'); subs.innerHTML = '';
@@ -226,7 +240,9 @@ function render() {
   if (!state.defects.length) ul.innerHTML = '<li class="empty">Žádné zřetelné vady. 🎉</li>';
   state.defects.forEach((d, i) => {
     const li = document.createElement('li'); if (i === state.activeDefect) li.classList.add('active');
-    li.innerHTML = `<div class="ico">${ICONS[d.type] || '•'}</div><div><div class="title">${DEFECT_NAMES[d.type] || d.type} – ${severityWord(d.severity)}<span class="sev"><i style="width:${Math.round(d.severity * 100)}%"></i></span></div><div class="meta">${d.side === 'back' ? 'zadní strana' : 'přední strana'}${d.note ? ' · ' + d.note : ''} · jistota ${confidenceWord(d.confidence)}</div></div>`;
+    const possible = !usableDefect(d) && d.type !== 'print_line';
+    if (possible) li.classList.add('possible');
+    li.innerHTML = `<div class="ico">${ICONS[d.type] || '•'}</div><div><div class="title">${possible ? 'Možný ' : ''}${possible ? (DEFECT_NAMES[d.type] || d.type).toLowerCase() : (DEFECT_NAMES[d.type] || d.type)} – ${severityWord(d.severity)}<span class="sev"><i style="width:${Math.round(d.severity * 100)}%"></i></span></div><div class="meta">${d.side === 'back' ? 'zadní strana' : 'přední strana'}${d.note ? ' · ' + d.note : ''} · jistota ${confidenceWord(d.confidence)}${possible ? ' · do známky se nepočítá, ověř v bočním světle' : ''}</div></div>`;
     li.onclick = () => { state.activeDefect = i; state.side = d.side; state.filter = 'defects'; render(); $('#view').scrollIntoView({ behavior: 'smooth', block: 'center' }); };
     ul.append(li);
   });
@@ -272,8 +288,8 @@ function drawView() {
     ctx.strokeStyle = 'rgba(255,203,5,.9)'; ctx.strokeRect(L, T, w - L - R, h - T - B);
     ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(w / 2 - 170, h / 2 - 60, 340, 120);
     ctx.fillStyle = '#ffcb05'; ctx.textAlign = 'center';
-    ctx.fillText(`L ${L} px · R ${R} px → ${Math.round(r.frame.lr * 100)}/${Math.round((1 - r.frame.lr) * 100)}`, w / 2, h / 2 - 15);
-    ctx.fillText(`T ${T} px · B ${B} px → ${Math.round(r.frame.tb * 100)}/${Math.round((1 - r.frame.tb) * 100)}`, w / 2, h / 2 + 30);
+    ctx.fillText(r.frame.lrOk ? `L ${L} px · R ${R} px → ${Math.round(r.frame.lr * 100)}/${Math.round((1 - r.frame.lr) * 100)}` : 'L/R: rámeček nenalezen', w / 2, h / 2 - 15);
+    ctx.fillText(r.frame.tbOk ? `T ${T} px · B ${B} px → ${Math.round(r.frame.tb * 100)}/${Math.round((1 - r.frame.tb) * 100)}` : 'T/B: rámeček nenalezen', w / 2, h / 2 + 30);
   } else if (state.filter === 'centering') {
     ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(w / 2 - 200, h / 2 - 30, 400, 60); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText('Rámeček nenalezen – centrování nelze změřit', w / 2, h / 2 + 8);
   }
@@ -323,7 +339,7 @@ function reportText() {
 $('#copy-report').addEventListener('click', async () => { try { await navigator.clipboard.writeText(reportText()); $('#copy-report').textContent = 'Zkopírováno ✓'; setTimeout(() => $('#copy-report').textContent = 'Kopírovat report', 1500); } catch { prompt('Zkopíruj text:', reportText()); } });
 $('#share-report').addEventListener('click', async () => { if (navigator.share) { try { await navigator.share({ title: 'Card Grader report', text: reportText() }); } catch {} } else alert('Sdílení není v tomto prohlížeči dostupné – použij Kopírovat report.'); });
 $('#download-json').addEventListener('click', () => {
-  const out = { meta: { name: $('#cardName').value, era: $('#era').value, rarity: $('#rarity').value, date: new Date().toISOString() }, grades: state.grades, defects: state.defects, whatIfs: state.whatIfs.map(w => ({ type: w.group.type, without: w.without, delta: w.delta })), recommendation: state.recommendation,
+  const out = { meta: { name: $('#cardName').value, era: $('#era').value, rarity: $('#rarity').value, date: new Date().toISOString() }, quality: state.quality, grades: state.grades, defects: state.defects, whatIfs: state.whatIfs.map(w => ({ type: w.group.type, without: w.without, delta: w.delta })), recommendation: state.recommendation,
     measurements: Object.fromEntries(Object.entries(state.results).map(([s, r]) => [s, { frame: r.frame, edges: r.edges, corners: r.corners, glareFrac: r.glareFrac, detected: r.detected, detectConfidence: r.detectConfidence }])) };
   download(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }), 'card-grader-report.json');
 });

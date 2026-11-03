@@ -107,19 +107,29 @@ function euFromNumeric(num, defs) {
   return EU_SCALE[Math.min(idx, cap)];
 }
 
+// Which detections are solid enough to move the grade. Dents and bends need raking light to be sure,
+// so they count only when the detector is confident; weaker ones are reported as "possible".
+export const MIN_CONFIDENCE = { dent: 0.5, bend: 0.5, scratch: 0.4, crease: 0.4, whitening_edge: 0.5, whitening_corner: 0.5, default: 0.3 };
+export function usableDefect(d) {
+  if (d.type === 'print_line') return false;
+  return d.confidence >= (MIN_CONFIDENCE[d.type] ?? MIN_CONFIDENCE.default);
+}
+
 /**
  * Compute grades from the merged defect list.
  * @param defects  array of defects from analyzers (both sides)
  * @param centering { front:{lr,tb,confidence}, back?:{lr,tb,confidence} }
  */
 export function computeGrades(defects, centering) {
-  const usable = defects.filter(d => d.confidence >= 0.3 && d.type !== 'print_line');
+  const usable = defects.filter(usableDefect);
   const cF = centering.front || {};
   const cLR = centeringSubgrade(cF.lr, 'front'), cTB = centeringSubgrade(cF.tb, 'front');
-  let cent = (cLR.grade === null || cTB.grade === null) ? null : Math.min(cLR.grade, cTB.grade);
-  if (centering.back && centering.back.lr !== null && centering.back.lr !== undefined) {
+  const known0 = [cLR.grade, cTB.grade].filter(v => v !== null);
+  let cent = known0.length ? Math.min(...known0) : null;
+  if (centering.back) {
     const bLR = centeringSubgrade(centering.back.lr, 'back'), bTB = centeringSubgrade(centering.back.tb, 'back');
-    cent = Math.min(cent ?? 10, bLR.grade, bTB.grade);
+    const kb = [bLR.grade, bTB.grade].filter(v => v !== null);
+    if (kb.length) cent = Math.min(cent ?? 10, ...kb);
   }
   const sub = {
     centering: cent,

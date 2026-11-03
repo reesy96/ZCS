@@ -23,10 +23,10 @@ export function packResult(rect, res) {
   const result = {
     side: res.side, w, h, quad, detectConfidence: confidence, detected,
     card: card.data, whitening, highpass, relief, ridge,
-    frame: { L: res.frame.L, R: res.frame.R, T: res.frame.T, B: res.frame.B, valid: res.frame.valid, confidence: res.frame.confidence, lr: res.frame.lr, tb: res.frame.tb, art: res.frame.art },
+    frame: { L: res.frame.L, R: res.frame.R, T: res.frame.T, B: res.frame.B, valid: res.frame.valid, lrOk: res.frame.lrOk, tbOk: res.frame.tbOk, confidence: res.frame.confidence, lr: res.frame.lr, tb: res.frame.tb, art: res.frame.art },
     edges: Object.fromEntries(Object.entries(res.edgeInfo.edges).map(([k, v]) => [k, { fraction: v.fraction, coverage: v.coverage, longestRun: v.longestRun }])),
     corners: res.edgeInfo.corners, band: res.edgeInfo.band, cornerR: res.edgeInfo.cornerR, uniformBorder: res.edgeInfo.uniformBorder,
-    glareFrac: res.surface.glareFrac,
+    glareFrac: res.surface.glareFrac, stats: res.stats,
     defects: res.defects.map(strip),
   };
   result.transfer = [result.card.buffer, whitening.buffer, highpass.buffer, relief.buffer, ridge.buffer];

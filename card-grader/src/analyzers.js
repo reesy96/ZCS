@@ -10,54 +10,71 @@ export function measureFrame(gray) {
   const { w, h, data } = gray;
   const g = gaussianBlur(gray, 1.2);
   const maxBorder = Math.round(w * 0.14);
+  // Average the gradient profile over many rows: the printed frame is at the same place in every row and
+  // survives the averaging, text and artwork do not. Then take the first clear peak from the card edge.
   const scan = (coordRange, lineRange, horizontal, fromStart) => {
-    const results = [];
-    for (let l = lineRange[0]; l < lineRange[1]; l += 3) {
-      let rowMax = 0;
-      const grads = [];
-      for (let c = coordRange[0]; c < coordRange[1]; c++) {
+    const n = coordRange[1] - coordRange[0];
+    const prof = new Float32Array(n);
+    const rows = [];
+    for (let l = lineRange[0]; l < lineRange[1]; l += 2) {
+      const row = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const c = coordRange[0] + i;
         const a = horizontal ? g.data[l * w + Math.max(0, c - 2)] : g.data[Math.max(0, c - 2) * w + l];
         const b = horizontal ? g.data[l * w + Math.min(w - 1, c + 2)] : g.data[Math.min(h - 1, c + 2) * w + l];
-        const gr = Math.abs(b - a);
-        grads.push(gr); if (gr > rowMax) rowMax = gr;
+        row[i] = Math.abs(b - a); prof[i] += row[i];
       }
-      const thr = Math.max(25, rowMax * 0.45);
-      if (rowMax < 25) continue;
-      if (fromStart) { for (let i = 0; i < grads.length; i++) if (grads[i] >= thr) { results.push(coordRange[0] + i); break; } }
-      else { for (let i = grads.length - 1; i >= 0; i--) if (grads[i] >= thr) { results.push(coordRange[0] + i); break; } }
+      rows.push(row);
     }
-    if (results.length < 5) return null;
-    const med = median(results);
-    const mad = median(results.map(v => Math.abs(v - med)));
-    return { value: med, mad };
+    for (let i = 0; i < n; i++) prof[i] /= rows.length;
+    let pmax = 0; for (let i = 0; i < n; i++) pmax = Math.max(pmax, prof[i]);
+    if (pmax < 10) return null;
+    const thr = Math.max(8, pmax * 0.4);
+    let idx = -1;
+    if (fromStart) { for (let i = 0; i < n; i++) if (prof[i] >= thr) { while (i + 1 < n && prof[i + 1] > prof[i]) i++; idx = i; break; } }
+    else { for (let i = n - 1; i >= 0; i--) if (prof[i] >= thr) { while (i - 1 >= 0 && prof[i - 1] > prof[i]) i--; idx = i; break; } }
+    if (idx < 0) return null;
+    // Consistency: how many rows show the edge within +-3 px of the averaged position.
+    let agree = 0;
+    for (const row of rows) { let m = 0; for (let k = -3; k <= 3; k++) { const j = idx + k; if (j >= 0 && j < n) m = Math.max(m, row[j]); } if (m >= thr * 0.6) agree++; }
+    return { value: coordRange[0] + idx, mad: agree / rows.length >= 0.7 ? 0 : 10 };
   };
   const yMid = [Math.round(h * 0.30), Math.round(h * 0.70)];
   const xMid = [Math.round(w * 0.30), Math.round(w * 0.70)];
-  const left = scan([3, maxBorder], yMid, true, true);
-  const right = scan([w - maxBorder, w - 3], yMid, true, false);
-  const top = scan([3, maxBorder], xMid, false, true);
-  const bottom = scan([h - maxBorder, h - 3], xMid, false, false);
+  // Start a little inside: the physical card edge (and any background seam) must not count as the frame.
+  const skip = Math.round(w * 0.018);
+  const left = scan([skip, maxBorder], yMid, true, true);
+  const right = scan([w - maxBorder, w - skip], yMid, true, false);
+  const top = scan([skip, maxBorder], xMid, false, true);
+  const bottom = scan([h - maxBorder, h - skip], xMid, false, false);
   const L = left ? left.value : null, R = right ? w - 1 - right.value : null;
   const T = top ? top.value : null, B = bottom ? h - 1 - bottom.value : null;
   const ok = v => v !== null && v >= w * 0.015 && v <= w * 0.13;
   const consistent = (s) => s && s.mad <= 3;
-  const valid = ok(L) && ok(R) && ok(T) && ok(B);
+  const lrOk = ok(L) && ok(R), tbOk = ok(T) && ok(B);
+  const valid = lrOk || tbOk; // one measurable axis is enough for a (partial) centering measurement
   let confidence = 0;
   if (valid) {
     confidence = 1;
-    for (const s of [left, right, top, bottom]) if (!consistent(s)) confidence -= 0.2;
+    for (const s of [left, right, top, bottom]) if (s && !consistent(s)) confidence -= 0.2;
+    if (!(lrOk && tbOk)) confidence -= 0.25;
     confidence = clamp01(confidence);
   }
-  return { L, R, T, B, valid, confidence,
-    lr: valid ? L / (L + R) : null, tb: valid ? T / (T + B) : null,
-    art: valid ? { x: L, y: T, w: w - L - R, h: h - T - B } : { x: Math.round(w * 0.05), y: Math.round(h * 0.05), w: Math.round(w * 0.9), h: Math.round(h * 0.9) } };
+  // Missing sides are estimated from the measured ones so the art box is still usable.
+  const est = (v, alt) => (v !== null && ok(v)) ? v : (alt !== null && ok(alt)) ? alt : null;
+  const Lf = est(L, R), Rf = est(R, L), Tf = est(T, B), Bf = est(B, T);
+  const fill = (v) => v !== null ? v : Math.round(w * 0.045);
+  const art = valid ? { x: fill(Lf), y: fill(Tf), w: w - fill(Lf) - fill(Rf), h: h - fill(Tf) - fill(Bf) } : { x: Math.round(w * 0.05), y: Math.round(h * 0.05), w: Math.round(w * 0.9), h: Math.round(h * 0.9) };
+  return { L: Lf, R: Rf, T: Tf, B: Bf, valid, lrOk, tbOk, confidence,
+    lr: lrOk ? L / (L + R) : null, tb: tbOk ? T / (T + B) : null, art };
 }
 
 function centeringDefects(frame, side) {
   if (!frame.valid) return [];
-  const worst = Math.max(Math.abs(frame.lr - 0.5), Math.abs(frame.tb - 0.5)) * 2; // 0 = perfect, 1 = 100/0
+  const dLR = frame.lr === null ? 0 : Math.abs(frame.lr - 0.5), dTB = frame.tb === null ? 0 : Math.abs(frame.tb - 0.5);
+  const worst = Math.max(dLR, dTB) * 2; // 0 = perfect, 1 = 100/0
   if (worst < 0.12) return [];
-  const which = Math.abs(frame.lr - 0.5) >= Math.abs(frame.tb - 0.5) ? 'lr' : 'tb';
+  const which = dLR >= dTB ? 'lr' : 'tb';
   return [{ type: 'centering', severity: clamp01(worst), confidence: frame.confidence, side, box: frame.art, axis: which,
     note: which === 'lr' ? 'vlevo/vpravo' : 'nahoře/dole' }];
 }
@@ -359,7 +376,12 @@ export function analyzeSurface(img, gray, hsv, frame, edgeInfo, side, debug = nu
 
   // ---- Scratches: fine high-pass lines inside the art (oriented filter -> NMS ridge -> Hough segments).
   const sigma = robustSigma(absHp, artBox, 4);
-  const scratchResp = orientedLineResponse(hp, artBox, { length: 15, nAngles: 24 });
+  // Response on a slightly larger box than the extraction box, so the bipolarity test can see the dark side
+  // of the printed frame line just outside the art area.
+  const pad = 8;
+  const respBox = { x: Math.max(1, artBox.x - pad), y: Math.max(1, artBox.y - pad), w: 0, h: 0 };
+  respBox.w = Math.min(w - 1, artBox.x + artBox.w + pad) - respBox.x; respBox.h = Math.min(h - 1, artBox.y + artBox.h + pad) - respBox.y;
+  const scratchResp = orientedLineResponse(hp, respBox, { length: 15, nAngles: 24 });
   const scratchNms = nmsAcrossLines(scratchResp.resp, scratchResp.ang, artBox);
   const scratchThr = Math.max(6, 3.5 * sigma);
   const sSegs = houghSegments(scratchNms, artBox, { thr: scratchThr, minLen: 16, tol: 2.5, maxGap: 5, maxSegments: 40, ang: scratchResp.ang, angTol: 9 });
@@ -369,7 +391,9 @@ export function analyzeSurface(img, gray, hsv, frame, edgeInfo, side, debug = nu
     const fit = { cx: sg.cx, cy: sg.cy, angle: sg.angle, length: sg.length, x0: sg.x0, y0: sg.y0, x1: sg.x1, y1: sg.y1 };
     const box = { x: Math.min(sg.x0, sg.x1), y: Math.min(sg.y0, sg.y1), w: Math.abs(sg.x1 - sg.x0) + 1, h: Math.abs(sg.y1 - sg.y0) + 1 };
     const l = { fit, box, amp: sg.amp, comp: { pixels: sg.pixels } };
-    log('scratch-cand', 'at', fit.cx, fit.cy, 'len', fit.length, 'amp', sg.amp, 'support', sg.support);
+    let signed = 0; for (const p of sg.pixels) signed += hp.data[p]; signed /= sg.pixels.length;
+    log('scratch-cand', 'at', fit.cx, fit.cy, 'len', fit.length, 'amp', sg.amp, 'support', sg.support, 'signed', signed);
+    if (signed < 0.3 * sg.amp) { log('  reject: dark line (printed text/outline)'); continue; } // scratches expose the lighter layer below
     if (nearCrease(fit.cx, fit.cy)) { log('  reject: near crease'); continue; }
     const ang = ((fit.angle * 180 / Math.PI) % 180 + 180) % 180;
     const axisAligned = ang < 2.5 || ang > 177.5 || Math.abs(ang - 90) < 2.5;
@@ -379,6 +403,18 @@ export function analyzeSurface(img, gray, hsv, frame, edgeInfo, side, debug = nu
     if (bip > 0.45) { log('  reject: bipolar (print edge)', bip); continue; } // printed step edge (text, outlines), not a scratch
     if (axisAligned && fit.length > 0.55 * (ang < 45 || ang > 135 ? artBox.w : artBox.h)) { printLines.push({ ...l, prominence }); continue; }
     scratches.push({ ...l, prominence });
+  }
+  // Holo foils and textured prints produce many short, parallel bright streaks. A real scratch is a lone line:
+  // drop short candidates that belong to an orientation bin with several similar candidates.
+  {
+    const bins = new Map();
+    for (const sc of scratches) { if (sc.fit.length >= 60) continue; const b = Math.round((((sc.fit.angle * 180 / Math.PI) % 180) + 180) % 180 / 15); const k = b % 12; bins.set(k, (bins.get(k) || 0) + 1); }
+    const textured = [...bins.entries()].filter(([, c]) => c >= 4).map(([k]) => k);
+    if (textured.length) {
+      const keep = scratches.filter(sc => { if (sc.fit.length >= 60) return true; const k = Math.round((((sc.fit.angle * 180 / Math.PI) % 180) + 180) % 180 / 15) % 12; return !textured.includes(k); });
+      log('scratch texture filter', 'dropped', scratches.length - keep.length);
+      scratches.length = 0; scratches.push(...keep);
+    }
   }
   for (const l of longScratches) if (!scratches.some(sc => inBox(l.fit.cx, l.fit.cy, { x: sc.box.x - 10, y: sc.box.y - 10, w: sc.box.w + 20, h: sc.box.h + 20 }))) scratches.push(l);
   scratches.sort((a, b) => b.fit.length - a.fit.length);
@@ -460,7 +496,12 @@ export function analyzeSurface(img, gray, hsv, frame, edgeInfo, side, debug = nu
     log('  accepted dent', 'contrast', contrast, 'onBorder', onBorder);
     const sizeMm = Math.sqrt(c.area) * MM;
     const severity = clamp01(0.2 + sizeMm / 8 + contrast / 80);
-    dents.push({ comp: c, severity, contrast, sizeMm, confidence: glarePenalty * clamp01((onBorder ? 0.5 : 0.3) + contrast / 50) * (onBorder ? 1 : 0.7), onBorder });
+    const thrHere = onBorder ? dentThr : dentThrArt;
+    const ratio = contrast / Math.max(1, thrHere);
+    // A dent in a plain photo is a weak cue (raking light is what really shows it): stay below 0.5 unless the
+    // shading is several times the local noise.
+    const confidence = glarePenalty * clamp01(0.2 + (ratio - 1) * 0.22) * (onBorder ? 1 : 0.75);
+    dents.push({ comp: c, severity, contrast, sizeMm, confidence, onBorder });
   }
   // Merge the lit/shadow lobes of one dent (and any touching blobs) into a single defect.
   const merged = [];
@@ -524,6 +565,15 @@ function detectBend(gray, band, w, h) {
   return { severity, confidence: clamp01(0.25 + (p.amp - 9) / 40), box, amp: p.amp, note: `${p.horizontal ? 'svislý' : 'vodorovný'} pás změny jasu (${p.amp.toFixed(0)} úrovní) – ověřte pohledem ze strany` };
 }
 
+// Mean luminance and a resolution-independent sharpness measure (high-pass energy relative to contrast).
+export function imageStats(gray, hp) {
+  const n = gray.data.length;
+  let s = 0, s2 = 0, g = 0, g2 = 0;
+  for (let i = 0; i < n; i++) { const v = hp.data[i]; s += v; s2 += v * v; const u = gray.data[i]; g += u; g2 += u * u; }
+  const vh = s2 / n - (s / n) ** 2, vg = Math.max(1, g2 / n - (g / n) ** 2);
+  return { meanLum: g / n, sharpness: Math.sqrt(Math.max(0, vh)) / Math.sqrt(vg) };
+}
+
 // ---------------------------------------------------------------- full pipeline for one side
 export function analyzeSide(card, side = 'front', { debug = false } = {}) {
   const log = debug ? [] : null;
@@ -533,5 +583,6 @@ export function analyzeSide(card, side = 'front', { debug = false } = {}) {
   const edgeInfo = analyzeEdgesAndCorners(card, hsv, frame, side);
   const surface = analyzeSurface(card, gray, hsv, frame, edgeInfo, side, log);
   const defects = [...centeringDefects(frame, side), ...edgeInfo.defects, ...surface.defects];
-  return { side, frame, edgeInfo, surface, defects, gray, log };
+  const stats = imageStats(gray, surface.highpass);
+  return { side, frame, edgeInfo, surface, defects, gray, log, stats };
 }
