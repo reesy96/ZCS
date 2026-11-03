@@ -115,7 +115,7 @@ function refineOutward(quad, mag, sw, sh, thr) {
       const beyond = prof.slice(k + 3, k + 8); const qb = beyond.length ? median(beyond) : 0;
       const gap = prof.slice(maxOff + 4, k - 2); const qg = gap.length ? median(gap) : 0;
       if (globalThis.CARD_DEBUG) console.log('  side', i, 'cand d', k - maxOff, 'v', v.toFixed(0), 'beyond', qb.toFixed(0), 'gap', qg.toFixed(0), 'gapLen', gap.length);
-      if (gap.length < 2 || v < 1.5 * qb || v < 2.5 * qg) continue;
+      if (gap.length < 2 || v < 1.5 * qb || v < 1.6 * qg) continue;
       bestD = k - maxOff; break;
     }
     if (globalThis.CARD_DEBUG) console.log('side', i, 'moved by', bestD, 'profile', Array.from(prof).map(v => v.toFixed(0)).join(' '));
@@ -132,33 +132,51 @@ function refineFullRes(quad, img) {
   const { w, h, data } = img;
   const lum = (x, y) => { const xi = Math.min(w - 1, Math.max(0, Math.round(x))), yi = Math.min(h - 1, Math.max(0, Math.round(y))); const i = (yi * w + xi) * 4; return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]; };
   const S = Math.min(Math.hypot(quad[1].x - quad[0].x, quad[1].y - quad[0].y), Math.hypot(quad[3].x - quad[0].x, quad[3].y - quad[0].y));
-  const R = Math.max(4, Math.round(S * 0.025));
+  const R = Math.max(6, Math.round(S * 0.06)); // wide enough to reach from the printed frame to the card edge
   const lines = [];
   for (let i = 0; i < 4; i++) {
     const a = quad[i], b = quad[(i + 1) % 4];
     const L = Math.hypot(b.x - a.x, b.y - a.y) || 1; const ux = (b.x - a.x) / L, uy = (b.y - a.y) / L; const nx = uy, ny = -ux;
-    const pts = [];
+    const pts = [], near = [];
     const step = Math.max(2, Math.floor(L / 80));
     for (let t = L * 0.08; t <= L * 0.92; t += step) {
-      // Gradient profile across the side at this position; the coarse side may be slightly rotated, so the
-      // edge is located independently for every t and a line is fitted afterwards.
+      // Gradient profile across the side at this position. The printed frame is always inside the card and
+      // only background lies outside, so the OUTERMOST clear peak is the physical edge; the nearest peak is
+      // kept as a fallback when the outermost choices do not agree along the side.
       const prof = new Float64Array(2 * R + 1);
       let pmax = 0;
       for (let d = -R; d <= R; d++) { const x = a.x + ux * t + nx * d, y = a.y + uy * t + ny * d; prof[d + R] = Math.abs(lum(x + 1.5 * nx, y + 1.5 * ny) - lum(x - 1.5 * nx, y - 1.5 * ny)); pmax = Math.max(pmax, prof[d + R]); }
       if (pmax < 10) continue;
-      let k = -1, bestDist = Infinity;
-      for (let j = 1; j < prof.length - 1; j++) if (prof[j] >= prof[j - 1] && prof[j] >= prof[j + 1] && prof[j] >= 0.5 * pmax) { const dist = Math.abs(j - R); if (dist < bestDist) { bestDist = dist; k = j; } }
-      if (k < 0) continue;
-      let d = k - R;
-      const y0 = prof[k - 1], y1 = prof[k], y2 = prof[k + 1]; const den = y0 - 2 * y1 + y2; if (den < 0) d += 0.5 * (y0 - y2) / den;
-      pts.push({ x: a.x + ux * t + nx * d, y: a.y + uy * t + ny * d });
+      // Nearest peak is judged inside a narrow window (+-3%) against that window's own maximum, so the strong
+      // printed frame further inside cannot veto a weak physical edge.
+      const Rn = Math.max(4, Math.round(S * 0.03));
+      let pmaxNear = 0; for (let j = R - Rn; j <= R + Rn; j++) pmaxNear = Math.max(pmaxNear, prof[j]);
+      let kOut = -1, kNear = -1, bestDist = Infinity;
+      for (let j = 1; j < prof.length - 1; j++) {
+        if (!(prof[j] >= prof[j - 1] && prof[j] >= prof[j + 1])) continue;
+        const v = prof[j];
+        if (Math.abs(j - R) <= Rn && v >= Math.max(10, 0.25 * pmaxNear)) { const dist = Math.abs(j - R); if (dist < bestDist) { bestDist = dist; kNear = j; } }
+        if (v < Math.max(10, 0.2 * pmax)) continue;
+        const beyond = []; for (let q = j + 3; q <= Math.min(prof.length - 1, j + 8); q++) beyond.push(prof[q]);
+        const qb = beyond.length ? beyond.reduce((s2, v2) => s2 + v2, 0) / beyond.length : 0;
+        if (beyond.length && qb > 0.8 * v) continue;
+        kOut = j; // keep the last (outermost) qualifying peak
+      }
+      const sub = (k) => { let d = k - R; const y0 = prof[k - 1], y1 = prof[k], y2 = prof[k + 1]; const den = y0 - 2 * y1 + y2; if (den < 0) d += 0.5 * (y0 - y2) / den; return d; };
+      if (kOut >= 0) { const d = sub(kOut); pts.push({ x: a.x + ux * t + nx * d, y: a.y + uy * t + ny * d }); }
+      if (kNear >= 0) { const d = sub(kNear); near.push({ x: a.x + ux * t + nx * d, y: a.y + uy * t + ny * d }); }
     }
-    if (pts.length < 8) { lines.push({ px: a.x, py: a.y, dx: ux, dy: uy }); continue; }
-    let l = fitLine(pts);
-    const resid = p => Math.abs(-(p.x - l.px) * l.dy + (p.y - l.py) * l.dx);
-    const inl = pts.filter(p => resid(p) <= 2.5);
-    if (inl.length >= 8) l = fitLine(inl);
-    lines.push(l);
+    const fitRobust = (P) => { let l = fitLine(P); const resid = p => Math.abs(-(p.x - l.px) * l.dy + (p.y - l.py) * l.dx); const inl = P.filter(p => resid(p) <= 2.5); return { l: inl.length >= 8 ? fitLine(inl) : l, frac: inl.length / P.length }; };
+    // The coarse stage already sits close to the physical edge: the nearest clear peak is the primary choice;
+    // the outermost peak is the fallback when the nearest choices disagree along the side.
+    let chosen = near.length >= 8 ? fitRobust(near) : null;
+    let used = 'near';
+    if (!chosen || chosen.frac < 0.6) { const alt = pts.length >= 8 ? fitRobust(pts) : null; if (alt && (!chosen || alt.frac > chosen.frac)) { chosen = alt; used = 'outer'; } }
+    if (globalThis.CARD_DEBUG) console.log('fullres side', i, 'outer pts', pts.length, 'frac', chosen && chosen.frac.toFixed(2), 'near pts', near.length, 'used', used, 'R', R);
+    // When the per-position picks do not agree (weak edge on a textured background) the coarse line is the
+    // better estimate: keep it rather than fitting noise.
+    if (!chosen) { lines.push({ px: a.x, py: a.y, dx: ux, dy: uy }); continue; }
+    lines.push(chosen.l);
   }
   const out = [];
   for (let i = 0; i < 4; i++) { const p = intersectLines(lines[(i + 3) % 4], lines[i]); if (!p) return quad; out.push(p); }
@@ -174,13 +192,41 @@ export function detectCardQuadEdges(img) {
   const ang = new Float32Array(sw * sh);
   for (let i = 0; i < ang.length; i++) ang[i] = Math.atan2(gy.data[i], gx.data[i]) + Math.PI / 2; // ridge (edge) direction
   const samples = []; for (let i = 0; i < mag.data.length; i += 7) samples.push(mag.data[i]);
-  const thr = Math.max(40, percentile(samples, 0.93));
   const box = { x: 1, y: 1, w: sw - 2, h: sh - 2 };
   const nms = nmsAcrossLines(mag, ang, box);
   const minSide = Math.min(sw, sh);
-  const segs = houghSegments(nms, box, { thr, minLen: Math.round(minSide * 0.12), tol: 2, maxGap: 12, maxSegments: 40, ang, angTol: 10 }).filter(sg => sg.support >= 0.45);
+  // Strong edges first (busy backgrounds such as wood grain stay out); only if nothing convincing comes out,
+  // admit weaker edges (a yellow or silver border on white paper).
+  const thrStrong = Math.max(25, percentile(samples, 0.93)), thrWeak = Math.max(25, percentile(samples, 0.85));
+  const strong = bestQuadFromEdges(nms, box, thrStrong, ang, sw, sh, minSide);
+  let best = strong, usedThr = thrStrong;
+  if (!strong || strong.score < 0.6) {
+    const weak = bestQuadFromEdges(nms, box, thrWeak, ang, sw, sh, minSide);
+    // Weaker edges win only when they reveal a clearly bigger card-shaped rectangle (the real outer edge
+    // of a pale border) or when the strong pass found nothing convincing.
+    if (weak && (!strong || weak.score > strong.score + 0.2 || (weak.score > strong.score + 0.03 && weak.area > strong.area * 1.1))) { best = weak; usedThr = thrWeak; }
+    if (globalThis.CARD_DEBUG) console.log('strong', strong && strong.score.toFixed(2), strong && (100 * strong.area / (sw * sh)).toFixed(0) + '%', 'weak', weak && weak.score.toFixed(2), weak && (100 * weak.area / (sw * sh)).toFixed(0) + '%', 'chosen', best === weak ? 'weak' : 'strong');
+  }
+  if (!best) return null;
+  let quad = refineOutward(best.quad, mag, sw, sh, usedThr);
+  {
+    const e = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const wEst = (e(quad[0], quad[1]) + e(quad[3], quad[2])) / 2, hEst = (e(quad[0], quad[3]) + e(quad[1], quad[2])) / 2;
+    best.landscape = wEst > hEst; best.ratio = Math.min(wEst, hEst) / Math.max(wEst, hEst);
+    best.score = best.meanCov * Math.max(0, 1 - Math.abs(best.ratio - 2.5 / 3.5) / 0.12);
+  }
+  if (best.landscape) quad = [quad[1], quad[2], quad[3], quad[0]];
+  let full = quad.map(p => ({ x: p.x / scale, y: p.y / scale }));
+  if (globalThis.CARD_DEBUG) console.log('before full-res', full.map(p => [p.x.toFixed(1), p.y.toFixed(1)]));
+  if (scale < 1) full = refineFullRes(full, img);
+  if (globalThis.CARD_DEBUG) console.log('after full-res ', full.map(p => [p.x.toFixed(1), p.y.toFixed(1)]));
+  return { quad: full, confidence: Math.min(1, best.score), method: 'edges', ratio: best.ratio, landscape: best.landscape };
+}
+
+function bestQuadFromEdges(nms, box, thr, ang, sw, sh, minSide) {
+  const segs = houghSegments(nms, box, { thr, minLen: Math.round(minSide * 0.12), tol: 2, maxGap: 12, maxSegments: 60, ang, angTol: 10 }).filter(sg => sg.support >= 0.45);
+  if (globalThis.CARD_DEBUG) { console.log('edge thr', thr.toFixed(0), 'segments', segs.length); for (const sg of segs.slice(0, 30)) console.log('  seg', Math.round(sg.x0), Math.round(sg.y0), '->', Math.round(sg.x1), Math.round(sg.y1), 'len', Math.round(sg.length), 'sup', sg.support.toFixed(2), 'amp', sg.amp.toFixed(0)); }
   const lines = segs.map(sg => ({ sg, ln: lineOf(sg), ang: Math.atan2(sg.y1 - sg.y0, sg.x1 - sg.x0) }));
-  // Pairs of parallel segments far enough apart.
   const pairs = [];
   for (let i = 0; i < lines.length; i++) for (let j = i + 1; j < lines.length; j++) {
     const a = lines[i], b = lines[j];
@@ -200,11 +246,10 @@ export function detectCardQuadEdges(img) {
     const area = Math.abs(quadArea(quad));
     if (area < 0.03 * sw * sh) continue;
     if (quad.some(c => c.x < -0.05 * sw || c.y < -0.05 * sh || c.x > 1.05 * sw || c.y > 1.05 * sh)) continue;
-    // Each of the four segments must cover a decent part of its side.
     const sides = [[quad[0], quad[1]], [quad[1], quad[2]], [quad[2], quad[3]], [quad[3], quad[0]]];
     const cov = [P.a, P.b, Q.a, Q.b].map(L => Math.max(...sides.map(([a, b]) => angleDiff(L.ang, Math.atan2(b.y - a.y, b.x - a.x)) < 0.2 ? sideCoverage(L.sg, a, b) : 0)));
     const meanCov = cov.reduce((s, v) => s + v, 0) / 4, minCov = Math.min(...cov);
-    if (minCov < 0.25) continue;
+    if (minCov < 0.12 || meanCov < 0.45) continue; // one side may be weak (silver border on white paper)
     const e = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
     const wEst = (e(quad[0], quad[1]) + e(quad[3], quad[2])) / 2, hEst = (e(quad[0], quad[3]) + e(quad[1], quad[2])) / 2;
     const ratio = Math.min(wEst, hEst) / Math.max(wEst, hEst);
@@ -213,22 +258,10 @@ export function detectCardQuadEdges(img) {
     // The card is the largest well-supported rectangle with card proportions: weight by relative area so a
     // sub-rectangle (text box to bottom edge) with coincidentally similar proportions does not win.
     const score = meanCov * aspectFit * Math.sqrt(area / (sw * sh));
+    if (globalThis.CARD_DEBUG && score > 0.15) console.log('  cand score', score.toFixed(2), 'cov', meanCov.toFixed(2), 'min', minCov.toFixed(2), 'aspect', ratio.toFixed(3), 'area%', (100 * area / (sw * sh)).toFixed(0), 'quad', quad.map(p => [Math.round(p.x), Math.round(p.y)]).join(' '));
     if (!best || score > best.score) best = { score, area, quad, landscape: wEst > hEst, ratio, meanCov, aspectFit };
   }
-  if (!best) return null;
-  let quad = refineOutward(best.quad, mag, sw, sh, thr);
-  {
-    const e = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-    const wEst = (e(quad[0], quad[1]) + e(quad[3], quad[2])) / 2, hEst = (e(quad[0], quad[3]) + e(quad[1], quad[2])) / 2;
-    best.landscape = wEst > hEst; best.ratio = Math.min(wEst, hEst) / Math.max(wEst, hEst);
-    best.score = best.meanCov * Math.max(0, 1 - Math.abs(best.ratio - 2.5 / 3.5) / 0.12);
-  }
-  if (best.landscape) quad = [quad[1], quad[2], quad[3], quad[0]];
-  let full = quad.map(p => ({ x: p.x / scale, y: p.y / scale }));
-  if (globalThis.CARD_DEBUG) console.log('before full-res', full.map(p => [p.x.toFixed(1), p.y.toFixed(1)]));
-  if (scale < 1) full = refineFullRes(full, img);
-  if (globalThis.CARD_DEBUG) console.log('after full-res ', full.map(p => [p.x.toFixed(1), p.y.toFixed(1)]));
-  return { quad: full, confidence: Math.min(1, best.score), method: 'edges', ratio: best.ratio, landscape: best.landscape };
+  return best;
 }
 
 /**
@@ -286,9 +319,9 @@ export function detectCardQuadColour(img) {
 export function detectCardQuad(img) {
   let edges = null, colour = null;
   try { edges = detectCardQuadEdges(img); } catch { edges = null; }
-  if (edges && edges.confidence >= 0.6) return edges;
+  if (edges && edges.confidence >= 0.45) return edges;
   try { colour = detectCardQuadColour(img); } catch { colour = null; }
-  if (edges && colour) return edges.confidence >= colour.confidence ? edges : colour;
+  if (edges && colour) return colour.confidence > edges.confidence + 0.2 ? colour : edges;
   return edges || colour;
 }
 

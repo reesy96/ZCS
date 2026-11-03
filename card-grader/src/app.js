@@ -159,10 +159,11 @@ function analyzeInWorker(side, image) {
     const onMsg = (e) => { if (e.data.id !== id) return; w.gotMessage = true; w.removeEventListener('message', onMsg); w.pending = w.pending.filter(f => f !== reject); e.data.ok ? resolve(e.data.result) : reject(new Error(e.data.error)); };
     w.addEventListener('message', onMsg); w.pending.push(reject);
     const px = pixelsOf(image);
-    w.postMessage({ id, side, image: { w: px.w, h: px.h, data: px.data.buffer } }, [px.data.buffer]);
+    w.postMessage({ id, side, image: { w: px.w, h: px.h, data: px.data.buffer }, hints: analysisHints() }, [px.data.buffer]);
     setTimeout(() => { if (workerFailed && !w.gotMessage) { w.removeEventListener('message', onMsg); runInline(side, image).then(resolve, reject); } }, 1500);
   });
 }
+function analysisHints() { return { fullArt: ['ultra', 'secret', 'illustration'].includes($('#rarity').value), era: $('#era').value }; }
 // Pixels of a stored image at the current MAX_SIDE (re-sampled smaller after a memory error).
 function pixelsOf(image) {
   const scale = Math.min(1, MAX_SIDE / Math.max(image.w, image.h));
@@ -175,7 +176,7 @@ async function runInline(side, image) {
   const [{ rectifyCard }, { analyzeSide }, { packResult }] = await Promise.all([import('./cardDetect.js'), import('./analyzers.js'), import('./pack.js')]);
   const px = pixelsOf(image);
   const rect = rectifyCard({ w: px.w, h: px.h, data: px.data });
-  return packResult(rect, analyzeSide(rect.card, side));
+  return packResult(rect, analyzeSide(rect.card, side, analysisHints()));
 }
 function progress(p, text) { $('#progress').hidden = false; $('#progress-fill').style.width = Math.round(p * 100) + '%'; $('#progress-text').textContent = text; }
 

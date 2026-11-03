@@ -39,19 +39,27 @@ export function makeCard(opts = {}) {
     set(x, y, c);
   }
   const blendWhite = (x, y, amt) => { const c = get(x, y); set(x, y, c.map(q => q + (255 - q) * amt)); };
+  // Rounded corners like a real card: outside the arc there is only the (white paper) background.
+  const CR = opts.cornerRadius ?? 38;
+  const arcCenter = (x, y) => [x < CR ? CR : x >= w - CR ? w - 1 - CR : null, y < CR ? CR : y >= h - CR ? h - 1 - CR : null];
+  const outsideArc = (x, y) => { const [cx, cy] = arcCenter(x, y); return cx !== null && cy !== null && Math.hypot(x - cx, y - cy) > CR; };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (outsideArc(x, y)) set(x, y, opts.paper ?? [235, 232, 228]);
   // Defects.
   for (const d of opts.defects || []) {
     if (d.type === 'corner') {
-      const cx = d.corner[1] === 'l' ? 0 : w - 1, cy = d.corner[0] === 't' ? 0 : h - 1;
+      // Wear along the rounded corner arc: whitening within `radius` px of the arc, fading inward.
+      const cx = d.corner[1] === 'l' ? CR : w - 1 - CR, cy = d.corner[0] === 't' ? CR : h - 1 - CR;
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        const dist = Math.hypot(x - cx, y - cy);
-        if (dist < d.radius) blendWhite(x, y, Math.min(1, (1 - dist / d.radius) * 1.6 + 0.3) * (0.7 + 0.3 * r()));
+        if (outsideArc(x, y)) continue;
+        const [ax, ay] = arcCenter(x, y); if (ax !== cx || ay !== cy) continue;
+        const toArc = CR - Math.hypot(x - cx, y - cy); // distance inward from the arc
+        if (toArc >= 0 && toArc < d.radius) blendWhite(x, y, Math.min(1, (1 - toArc / d.radius) * 1.6 + 0.3) * (0.7 + 0.3 * r()));
       }
     } else if (d.type === 'edge') {
       // Whitening strip along an edge between t0..t1 (fraction), depth px.
       const len = d.edge === 'top' || d.edge === 'bottom' ? w : h;
       for (let t = Math.round(d.t0 * len); t < d.t1 * len; t++) for (let k = 0; k < d.depth; k++) {
-        const amt = (1 - k / d.depth) * (0.6 + 0.4 * r());
+        const amt = (1 - 0.4 * k / d.depth) * (0.8 + 0.2 * r()); // chipped layer: nearly white, ragged inner boundary
         if (d.edge === 'top') blendWhite(t, k, amt); else if (d.edge === 'bottom') blendWhite(t, h - 1 - k, amt);
         else if (d.edge === 'left') blendWhite(k, t, amt); else blendWhite(w - 1 - k, t, amt);
       }

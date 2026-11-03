@@ -4,11 +4,11 @@ import { analyzeSide } from './analyzers.js';
 import { packResult } from './pack.js';
 
 self.onmessage = (e) => {
-  const { id, side, image } = e.data;
+  const { id, side, image, hints = {} } = e.data;
   try {
     const img = { w: image.w, h: image.h, data: new Uint8ClampedArray(image.data) };
     const rect = rectifyCard(img);
-    const res = analyzeSide(rect.card, side);
+    const res = analyzeSide(rect.card, side, { fullArt: !!hints.fullArt, era: hints.era || '' });
     const packed = packResult(rect, res);
     self.postMessage({ id, ok: true, result: packed }, packed.transfer);
   } catch (err) {

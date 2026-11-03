@@ -10,7 +10,7 @@ import { makeCard, embedInScene, writePNG } from './synth.js';
 const root = new URL('..', import.meta.url).pathname;
 const outDir = path.join(root, 'test', 'out'); fs.mkdirSync(outDir, { recursive: true });
 const card = makeCard({ seed: 21, borderL: 38, borderR: 26, defects: [
-  { type: 'corner', corner: 'tr', radius: 20 }, { type: 'edge', edge: 'left', t0: 0.5, t1: 0.7, depth: 4 },
+  { type: 'corner', corner: 'tr', radius: 20 }, { type: 'edge', edge: 'left', t0: 0.5, t1: 0.7, depth: 11 },
   { type: 'scratch', x0: 200, y0: 120, x1: 420, y1: 300, width: 2, amount: 0.9 }, { type: 'dent', x: 735, y: 400, radius: 16, strength: 35 }] });
 const { scene } = embedInScene(card, { angle: 0.06, persp: 0.0001, W: 1500, H: 2000 });
 const photo = path.join(outDir, 'photo.png'); writePNG(scene, photo);

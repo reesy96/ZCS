@@ -54,8 +54,8 @@ function edgesSubgrade(defs) {
     if (maxSev < 0.06) g = n <= 1 ? 9.5 : 9;
     else if (maxSev < 0.15) g = n <= 1 ? 9 : 8.5;
     else if (maxSev < 0.3) g = 8;
-    else if (maxSev < 0.5) g = 7;
-    else if (maxSev < 0.7) g = 6;
+    else if (maxSev < 0.55) g = 7;
+    else if (maxSev < 0.75) g = 6;
     else if (maxSev < 0.9) g = 5;
     else g = 4;
   }
