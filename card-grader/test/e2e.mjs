@@ -42,9 +42,9 @@ const summary = await page.evaluate(() => ({
   eu: document.querySelector('#eu-grade').textContent, psa: document.querySelector('#psa-grade').textContent, bgs: document.querySelector('#bgs-grade').textContent,
   defects: [...document.querySelectorAll('#defects li .title')].map(e => e.textContent), whatif: [...document.querySelectorAll('#whatif li')].map(e => e.textContent),
   rec: document.querySelector('#recommend .rec.primary b').textContent, conf: document.querySelector('#confidence-line').textContent }));
-for (const f of ['centering', 'whitening', 'surface', 'relief', 'corners', 'defects']) {
+for (const f of ['centering', 'whitening', 'surface', 'emboss', 'relief', 'corners', 'defects']) {
   await page.evaluate((f) => { window.__cardGrader.state.filter = f; }, f);
-  await page.click(`#filters button:nth-child(${['original', 'centering', 'whitening', 'surface', 'relief', 'corners', 'defects'].indexOf(f) + 1})`);
+  await page.click(`#filters button:nth-child(${['original', 'centering', 'whitening', 'surface', 'emboss', 'relief', 'corners', 'defects'].indexOf(f) + 1})`);
   await page.locator('#view').screenshot({ path: path.join(outDir, `filter-${f}.png`) });
 }
 await browser.close(); server.close();

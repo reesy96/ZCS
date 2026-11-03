@@ -186,6 +186,7 @@ const FILTERS = [
   ['centering', 'Centrování', 'Změřené šířky okrajů (px) a poměry L/R, T/B. Čáry ukazují nalezený vnitřní rámeček.'],
   ['whitening', 'Whitening', 'Červeně pixely na hranách a rozích, které jsou výrazně světlejší a méně syté než zbytek okraje.'],
   ['surface', 'Povrch', 'Horní propust: zvýrazní jemné škrábance a tiskové linky v ploše.'],
+  ['emboss', 'Emboss', 'Reliéfní sken jako u gradingových firem: šedý podklad, každá nerovnost povrchu (dent, kríz, škrábanec, vlnka) vrhá „stín“. Přepni směr světla, vady vyniknou z různých stran.'],
   ['relief', 'Reliéf', 'Pásmová propust: denty a ohyby se projeví jako měkké světlé/tmavé skvrny, krízy jako dlouhé linie.'],
   ['corners', 'Rohy 4×', 'Čtyři rohy zvětšené 4×, whitening podbarven červeně.'],
   ['defects', 'Vady', 'Všechny nalezené vady vyznačené na kartě.'],
@@ -269,8 +270,38 @@ function grayToImageData(u8, w, h) {
   for (let i = 0, j = 0; i < u8.length; i++, j += 4) { id.data[j] = id.data[j + 1] = id.data[j + 2] = u8[i]; id.data[j + 3] = 255; }
   return id;
 }
+// Emboss: directional derivative of the (lightly smoothed) luminance around mid grey, like the surface scans
+// grading companies publish. Cached per side + direction.
+const EMBOSS_DIRS = [['↖', -1, -1], ['↑', 0, -1], ['↗', 1, -1], ['→', 1, 0]];
+state.embossDir = 1; state.embossStrength = 4;
+function embossImage(r) {
+  const key = `${state.side}-${state.embossDir}-${state.embossStrength}`;
+  if (r._emboss && r._emboss.key === key) return r._emboss.img;
+  const { w, h } = r; const d = r.card;
+  const g = new Float32Array(w * h);
+  for (let i = 0, j = 0; i < w * h; i++, j += 4) g[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+  // 3x3 box smoothing to keep sensor noise out of the relief.
+  const sm = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; sm[i] = (g[i - w - 1] + g[i - w] + g[i - w + 1] + g[i - 1] + g[i] + g[i + 1] + g[i + w - 1] + g[i + w] + g[i + w + 1]) / 9; }
+  const [, dx, dy] = EMBOSS_DIRS[state.embossDir]; const k = state.embossStrength;
+  const img = new ImageData(w, h);
+  for (let y = 2; y < h - 2; y++) for (let x = 2; x < w - 2; x++) {
+    const i = y * w + x;
+    const v = Math.max(0, Math.min(255, 128 + k * (sm[(y + dy) * w + (x + dx)] - sm[(y - dy) * w + (x - dx)])));
+    const o = i * 4; img.data[o] = img.data[o + 1] = img.data[o + 2] = v; img.data[o + 3] = 255;
+  }
+  r._emboss = { key, img };
+  return img;
+}
+function renderEmbossDirs() {
+  const box = $('#emboss-dirs'); box.hidden = state.filter !== 'emboss'; box.innerHTML = '';
+  if (box.hidden) return;
+  EMBOSS_DIRS.forEach(([label], i) => { const b = document.createElement('button'); b.textContent = `Světlo ${label}`; b.className = i === state.embossDir ? 'active' : ''; b.onclick = () => { state.embossDir = i; drawView(); }; box.append(b); });
+  for (const [label, k] of [['jemně', 2.5], ['silně', 6]]) { const b = document.createElement('button'); b.textContent = label; b.className = state.embossStrength === k ? 'active' : ''; b.onclick = () => { state.embossStrength = state.embossStrength === k ? 4 : k; drawView(); }; box.append(b); }
+}
 function drawView() {
   const r = state.results[state.side]; if (!r) return;
+  renderEmbossDirs();
   const { w, h } = r;
   const canvas = $('#view');
   const ctx = canvas.getContext('2d');
@@ -280,6 +311,7 @@ function drawView() {
   let base;
   if (state.filter === 'surface') base = grayToImageData(r.highpass, w, h);
   else if (state.filter === 'relief') base = grayToImageData(r.relief, w, h);
+  else if (state.filter === 'emboss') base = embossImage(r);
   else base = new ImageData(new Uint8ClampedArray(r.card), w, h);
   if (state.filter === 'whitening') { for (let i = 0, j = 0; i < w * h; i++, j += 4) if (r.whitening[i]) { base.data[j] = 255; base.data[j + 1] = 40; base.data[j + 2] = 40; } }
   ctx.putImageData(base, 0, 0);
@@ -294,7 +326,7 @@ function drawView() {
   } else if (state.filter === 'centering') {
     ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(w / 2 - 200, h / 2 - 30, 400, 60); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText('Rámeček nenalezen – centrování nelze změřit', w / 2, h / 2 + 8);
   }
-  if (state.filter === 'defects' || state.filter === 'whitening' || state.filter === 'surface' || state.filter === 'relief') {
+  if (state.filter === 'defects' || state.filter === 'whitening' || state.filter === 'surface' || state.filter === 'relief' || state.filter === 'emboss') {
     r.defects.forEach(d => {
       const globalIdx = state.defects.indexOf(d) >= 0 ? state.defects.indexOf(d) : state.defects.findIndex(x => x.type === d.type && x.box && d.box && x.box.x === d.box.x && x.box.y === d.box.y);
       const active = globalIdx === state.activeDefect;
