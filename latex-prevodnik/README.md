@@ -16,7 +16,7 @@ cd latex-prevodnik
 python spustit.py
 ```
 
-Otevře se prohlížeč s adresou `http://127.0.0.1:8765/`. Potom:
+Ve Windows stačí dvojklik na **`spustit.bat`**. Otevře se prohlížeč s adresou `http://127.0.0.1:8765/`. Potom:
 
 1. **Nahraj hotový článek.** Celý projekt jako ZIP nebo složku, tedy `.tex`, obrázky a `.bib`.
 2. **Nahraj šablonu časopisu.** ZIP nebo složka, jak ji časopis poskytuje (`.tex`, `.cls`, `.bst`, …).
