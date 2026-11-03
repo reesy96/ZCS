@@ -23,28 +23,19 @@ export function toGray(img) {
   return out;
 }
 
-// Returns {hue(0..360), sat(0..1), val(0..255)} arrays for RGBA image.
+// Returns {sat(0..1), val(0..255)} arrays for an RGBA image (hue is not needed by the analyzers).
 export function toHSV(img) {
   const { w, h, data } = img;
   const n = w * h;
-  const hue = new Float32Array(n), sat = new Float32Array(n), val = new Float32Array(n);
+  const sat = new Float32Array(n), val = new Float32Array(n);
   for (let i = 0, j = 0; i < n; i++, j += 4) {
     const r = data[j], g = data[j + 1], b = data[j + 2];
     const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
     const d = mx - mn;
     val[i] = mx;
     sat[i] = mx === 0 ? 0 : d / mx;
-    let hh = 0;
-    if (d !== 0) {
-      if (mx === r) hh = ((g - b) / d) % 6;
-      else if (mx === g) hh = (b - r) / d + 2;
-      else hh = (r - g) / d + 4;
-      hh *= 60;
-      if (hh < 0) hh += 360;
-    }
-    hue[i] = hh;
   }
-  return { w, h, hue, sat, val };
+  return { w, h, sat, val };
 }
 
 function reflect(i, n) {

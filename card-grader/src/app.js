@@ -5,7 +5,8 @@ import { DEFECT_NAMES, severityWord, confidenceWord, defectSentence, whatIfSente
 
 const $ = (s) => document.querySelector(s);
 const state = { images: { front: null, back: null }, results: {}, grades: null, whatIfs: [], recommendation: null, side: 'front', filter: 'original', activeDefect: -1 };
-const MAX_SIDE = 2200; // longest side of the source photo we hand to the analyzer
+let MAX_SIDE = 1800; // longest side of the source photo we hand to the analyzer (lowered automatically on memory errors)
+const MIN_SIDE = 1100;
 
 // ---------------------------------------------------------------- setup
 for (const e of ERAS) $('#era').append(new Option(e.label, e.id));
@@ -26,8 +27,29 @@ async function loadFile(file, side) {
   setImage(side, bmp);
 }
 async function decodeImage(file) {
-  if ('createImageBitmap' in window) { try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch {} }
+  // Phone photos are often 12-108 MP; decoding them at full size needs hundreds of MB. Ask the browser to
+  // decode straight into a smaller bitmap (JPEG decoders can do this cheaply).
+  if ('createImageBitmap' in window) {
+    try {
+      const probe = await createImageBitmap(file, { imageOrientation: 'from-image', resizeWidth: 64, resizeHeight: 64, resizeQuality: 'low' }).catch(() => null);
+      if (probe) probe.close();
+      const dims = await imageDimensions(file);
+      const scale = Math.min(1, MAX_SIDE / Math.max(dims.w, dims.h));
+      const opts = { imageOrientation: 'from-image' };
+      if (scale < 1) { opts.resizeWidth = Math.round(dims.w * scale); opts.resizeHeight = Math.round(dims.h * scale); opts.resizeQuality = 'high'; }
+      return await createImageBitmap(file, opts);
+    } catch {}
+  }
   return new Promise((res, rej) => { const img = new Image(); img.onload = () => res(img); img.onerror = rej; img.src = URL.createObjectURL(file); });
+}
+// Read the pixel dimensions without decoding pixels (an <img> element reports naturalWidth after a header-only decode).
+function imageDimensions(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = () => { const w = img.naturalWidth, h = img.naturalHeight; URL.revokeObjectURL(url); img.src = ''; res({ w, h }); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('nelze přečíst obrázek')); };
+    img.src = url;
+  });
 }
 function setImage(side, source) {
   const sw = source.width || source.videoWidth, sh = source.height || source.videoHeight;
@@ -35,8 +57,9 @@ function setImage(side, source) {
   const c = document.createElement('canvas'); c.width = Math.round(sw * scale); c.height = Math.round(sh * scale);
   const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(source, 0, 0, c.width, c.height);
-  const imageData = ctx.getImageData(0, 0, c.width, c.height);
-  state.images[side] = { imageData, w: c.width, h: c.height };
+  if (source.close) source.close(); // free the decoded bitmap right away
+  // Keep only the canvas; pixels are extracted (and transferred, not copied) when the analysis starts.
+  state.images[side] = { canvas: c, w: c.width, h: c.height };
   const thumb = $('#thumb-' + side); thumb.innerHTML = ''; thumb.classList.add('has');
   const t = document.createElement('canvas'); const ts = 300 / Math.max(c.width, c.height); t.width = c.width * ts; t.height = c.height * ts;
   t.getContext('2d').drawImage(c, 0, 0, t.width, t.height); thumb.append(t);
@@ -45,8 +68,16 @@ function setImage(side, source) {
 
 // ---------------------------------------------------------------- live camera
 let stream = null, liveSide = 'front';
+const liveAvailable = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+if (!liveAvailable) for (const b of document.querySelectorAll('[data-live]')) { b.title = 'Živá kamera funguje jen přes HTTPS nebo localhost'; b.classList.add('disabled-soft'); }
 async function openLive(side) {
   liveSide = side;
+  if (!liveAvailable) {
+    alert(window.isSecureContext
+      ? 'Tento prohlížeč živou kameru nepodporuje. Použij tlačítko „Vyfotit / vybrat“ – otevře systémový fotoaparát v plném rozlišení.'
+      : 'Živá kamera funguje jen na zabezpečené adrese (HTTPS nebo localhost). Přes http://IP ji prohlížeč blokuje.\n\nPoužij tlačítko „Vyfotit / vybrat“ – otevře systémový fotoaparát a výsledek je stejný.');
+    return;
+  }
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 } }, audio: false });
   } catch (e) { alert('Kameru se nepodařilo otevřít: ' + e.message + '\nPoužij tlačítko „Vyfotit / vybrat“.'); return; }
@@ -68,8 +99,11 @@ $('#live-shutter').addEventListener('click', async () => {
 let worker = null, workerFailed = false, reqId = 0;
 function getWorker() {
   if (worker || workerFailed) return worker;
-  try { worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' }); worker.onerror = () => { workerFailed = true; worker = null; }; }
-  catch { workerFailed = true; }
+  try {
+    worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+    worker.onerror = (e) => { const w = worker; worker = null; if (!w.gotMessage) workerFailed = true; for (const f of w.pending || []) f(new Error(e.message || 'worker selhal (pravděpodobně nedostatek paměti)')); w.pending = []; };
+    worker.pending = [];
+  } catch { workerFailed = true; }
   return worker;
 }
 function analyzeInWorker(side, image) {
@@ -77,16 +111,25 @@ function analyzeInWorker(side, image) {
     const w = getWorker();
     if (!w) return runInline(side, image).then(resolve, reject);
     const id = ++reqId;
-    const onMsg = (e) => { if (e.data.id !== id) return; w.removeEventListener('message', onMsg); e.data.ok ? resolve(e.data.result) : reject(new Error(e.data.error)); };
-    w.addEventListener('message', onMsg);
-    const copy = new Uint8ClampedArray(image.imageData.data); // keep the original for a possible retry
-    w.postMessage({ id, side, image: { w: image.w, h: image.h, data: copy.buffer } }, [copy.buffer]);
-    setTimeout(() => { if (workerFailed) { w.removeEventListener('message', onMsg); runInline(side, image).then(resolve, reject); } }, 1500);
+    const onMsg = (e) => { if (e.data.id !== id) return; w.gotMessage = true; w.removeEventListener('message', onMsg); w.pending = w.pending.filter(f => f !== reject); e.data.ok ? resolve(e.data.result) : reject(new Error(e.data.error)); };
+    w.addEventListener('message', onMsg); w.pending.push(reject);
+    const px = pixelsOf(image);
+    w.postMessage({ id, side, image: { w: px.w, h: px.h, data: px.data.buffer } }, [px.data.buffer]);
+    setTimeout(() => { if (workerFailed && !w.gotMessage) { w.removeEventListener('message', onMsg); runInline(side, image).then(resolve, reject); } }, 1500);
   });
+}
+// Pixels of a stored image at the current MAX_SIDE (re-sampled smaller after a memory error).
+function pixelsOf(image) {
+  const scale = Math.min(1, MAX_SIDE / Math.max(image.w, image.h));
+  let c = image.canvas;
+  if (scale < 1) { c = document.createElement('canvas'); c.width = Math.round(image.w * scale); c.height = Math.round(image.h * scale); c.getContext('2d').drawImage(image.canvas, 0, 0, c.width, c.height); }
+  const id = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height);
+  return { w: c.width, h: c.height, data: id.data };
 }
 async function runInline(side, image) {
   const [{ rectifyCard }, { analyzeSide }, { packResult }] = await Promise.all([import('./cardDetect.js'), import('./analyzers.js'), import('./pack.js')]);
-  const rect = rectifyCard({ w: image.w, h: image.h, data: image.imageData.data });
+  const px = pixelsOf(image);
+  const rect = rectifyCard({ w: px.w, h: px.h, data: px.data });
   return packResult(rect, analyzeSide(rect.card, side));
 }
 function progress(p, text) { $('#progress').hidden = false; $('#progress-fill').style.width = Math.round(p * 100) + '%'; $('#progress-text').textContent = text; }
@@ -98,7 +141,15 @@ async function analyze() {
     let i = 0;
     for (const side of sides) {
       progress((i + 0.1) / sides.length, `${side === 'front' ? 'Přední' : 'Zadní'} strana: hledám kartu, narovnávám a měřím…`);
-      state.results[side] = await analyzeInWorker(side, state.images[side]);
+      try {
+        state.results[side] = await analyzeInWorker(side, state.images[side]);
+      } catch (e) {
+        if (MAX_SIDE <= MIN_SIDE) throw e;
+        // Most likely out of memory: drop the working resolution and try once more.
+        MAX_SIDE = MIN_SIDE; if (worker) { worker.terminate(); worker = null; }
+        progress((i + 0.2) / sides.length, 'Málo paměti – zkouším znovu v nižším rozlišení…');
+        state.results[side] = await analyzeInWorker(side, state.images[side]);
+      }
       i++;
     }
     progress(0.95, 'Vyhodnocuji grade…');
@@ -109,7 +160,7 @@ async function analyze() {
     $('#results').scrollIntoView({ behavior: 'smooth' });
   } catch (e) {
     console.error(e);
-    progress(1, 'Analýza selhala: ' + e.message);
+    progress(1, 'Analýza selhala: ' + e.message + ' – zkus menší fotku nebo zavřít ostatní karty prohlížeče.');
   } finally { $('#analyze').disabled = false; }
 }
 
