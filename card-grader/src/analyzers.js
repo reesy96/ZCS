@@ -408,10 +408,11 @@ export function analyzeSurface(img, gray, hsv, frame, edgeInfo, side, debug = nu
   // drop short candidates that belong to an orientation bin with several similar candidates.
   {
     const bins = new Map();
-    for (const sc of scratches) { if (sc.fit.length >= 60) continue; const b = Math.round((((sc.fit.angle * 180 / Math.PI) % 180) + 180) % 180 / 15); const k = b % 12; bins.set(k, (bins.get(k) || 0) + 1); }
-    const textured = [...bins.entries()].filter(([, c]) => c >= 4).map(([k]) => k);
+    const TEX_LEN = 100; // streaks shorter than ~8 mm
+    for (const sc of scratches) { if (sc.fit.length >= TEX_LEN) continue; const b = Math.round((((sc.fit.angle * 180 / Math.PI) % 180) + 180) % 180 / 15); const k = b % 12; bins.set(k, (bins.get(k) || 0) + 1); }
+    const textured = [...bins.entries()].filter(([, c]) => c >= 3).map(([k]) => k);
     if (textured.length) {
-      const keep = scratches.filter(sc => { if (sc.fit.length >= 60) return true; const k = Math.round((((sc.fit.angle * 180 / Math.PI) % 180) + 180) % 180 / 15) % 12; return !textured.includes(k); });
+      const keep = scratches.filter(sc => { if (sc.fit.length >= TEX_LEN) return true; const k = Math.round((((sc.fit.angle * 180 / Math.PI) % 180) + 180) % 180 / 15) % 12; return !textured.includes(k); });
       log('scratch texture filter', 'dropped', scratches.length - keep.length);
       scratches.length = 0; scratches.push(...keep);
     }
@@ -524,7 +525,9 @@ export function analyzeSurface(img, gray, hsv, frame, edgeInfo, side, debug = nu
 
   // ---- Bend: smooth luminance bump along the border band (needs even lighting).
   const bend = detectBend(gray, edgeInfo.band, w, h);
-  if (bend) defects.push({ type: 'bend', severity: bend.severity, confidence: bend.confidence * glarePenalty, side, box: bend.box, note: bend.note });
+  // A smooth brightness band is just as often a shadow on the photo as a bowed card, so a bend from one
+  // photo is only ever a hint ("possible bend"): it never moves the grade by itself.
+  if (bend) defects.push({ type: 'bend', severity: bend.severity, confidence: Math.min(0.45, bend.confidence * glarePenalty), side, box: bend.box, note: bend.note });
 
   return { glareFrac, sigma, scratchThr, scratches, printLines, creases, dents, bend, highpass: hp, relief, lineResp: scratchNms, creaseResp: crNms, creaseRidge: ridge, creaseTex: tex2, creaseThr, defects };
 }

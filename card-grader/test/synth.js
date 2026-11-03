@@ -97,10 +97,20 @@ export function makeCard(opts = {}) {
 }
 
 // Place the card into a larger "photo" with rotation/perspective over a uniform-ish background.
-export function embedInScene(card, { W = 1200, H = 1600, angle = 0.08, persp = 0.0002, bg = [70, 72, 80], scale = 0.75, seed = 7 } = {}) {
+export function embedInScene(card, { W = 1200, H = 1600, angle = 0.08, persp = 0.0002, bg = [70, 72, 80], scale = 0.75, seed = 7, wood = false, shadow = false } = {}) {
+  void scale;
   const scene = makeRGBA(W, H);
   const r = rng(seed);
-  for (let i = 0; i < W * H; i++) { const n = (r() - 0.5) * 10; scene.data[i * 4] = bg[0] + n; scene.data[i * 4 + 1] = bg[1] + n; scene.data[i * 4 + 2] = bg[2] + n; scene.data[i * 4 + 3] = 255; }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x; const n = (r() - 0.5) * 10;
+    let c = [bg[0] + n, bg[1] + n, bg[2] + n];
+    if (wood) { // light oak: horizontal grain stripes with a few dark lines
+      const grain = 12 * Math.sin(y * 0.09 + Math.sin(x * 0.01) * 3) + (Math.abs(Math.sin(y * 0.021)) > 0.985 ? -40 : 0);
+      c = [196 + grain + n, 164 + grain * 0.9 + n, 118 + grain * 0.7 + n];
+    }
+    if (shadow) { const f = 1 - 0.45 * Math.max(0, Math.min(1, (x - W * 0.55) / (W * 0.2))); c = c.map(v => v * f); } // soft shadow on the right
+    scene.data[i * 4] = c[0]; scene.data[i * 4 + 1] = c[1]; scene.data[i * 4 + 2] = c[2]; scene.data[i * 4 + 3] = 255;
+  }
   const cw = card.w * scale * (H / card.h) * 0.9 / scale * scale, ch = card.h * scale * (H / card.h) * 0.9 / scale * scale;
   const cx = W / 2, cy = H / 2;
   const corners = [[-cw / 2, -ch / 2], [cw / 2, -ch / 2], [cw / 2, ch / 2], [-cw / 2, ch / 2]].map(([x, y]) => {
@@ -120,7 +130,8 @@ export function embedInScene(card, { W = 1200, H = 1600, angle = 0.08, persp = 0
     if (p.x < 0 || p.y < 0 || p.x >= card.w || p.y >= card.h) continue;
     const sx = Math.min(card.w - 1, Math.floor(p.x)), sy = Math.min(card.h - 1, Math.floor(p.y));
     const s = (sy * card.w + sx) * 4, o = (y * W + x) * 4;
-    scene.data[o] = card.data[s]; scene.data[o + 1] = card.data[s + 1]; scene.data[o + 2] = card.data[s + 2];
+    const f = shadow ? 1 - 0.45 * Math.max(0, Math.min(1, (x - W * 0.55) / (W * 0.2))) : 1;
+    scene.data[o] = card.data[s] * f; scene.data[o + 1] = card.data[s + 1] * f; scene.data[o + 2] = card.data[s + 2] * f;
   }
   void H2;
   return { scene, corners };

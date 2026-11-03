@@ -28,20 +28,64 @@ async function loadFile(file, side) {
   setImage(side, bmp);
 }
 async function decodeImage(file) {
-  // Phone photos are often 12-108 MP; decoding them at full size needs hundreds of MB. Ask the browser to
-  // decode straight into a smaller bitmap (JPEG decoders can do this cheaply).
+  // Phone photos are often 12-108 MP; decoding them at full size needs hundreds of MB and kills the tab.
+  // 1) WebCodecs ImageDecoder can decode JPEG straight to a smaller size (scaled DCT decode, tiny memory).
+  // 2) Otherwise createImageBitmap with resize options. 3) Plain <img> as the last resort.
+  const dims = await imageDimensions(file).catch(() => null);
+  const scale = dims ? Math.min(1, MAX_SIDE / Math.max(dims.w, dims.h)) : 1;
+  const tw = dims ? Math.round(dims.w * scale) : 0, th = dims ? Math.round(dims.h * scale) : 0;
+  if ('ImageDecoder' in window && dims && scale < 1 && /^image\/(jpeg|png|webp)$/.test(file.type)) {
+    try {
+      const buf = await file.arrayBuffer();
+      const orientation = file.type === 'image/jpeg' ? exifOrientation(buf) : 1;
+      const dec = new ImageDecoder({ data: buf, type: file.type, desiredWidth: tw, desiredHeight: th });
+      const { image } = await dec.decode();
+      const bmp = await createImageBitmap(image); image.close(); dec.close();
+      return orientation > 1 ? applyOrientation(bmp, orientation) : bmp;
+    } catch (e) { console.warn('ImageDecoder path failed, falling back', e); }
+  }
   if ('createImageBitmap' in window) {
     try {
-      const probe = await createImageBitmap(file, { imageOrientation: 'from-image', resizeWidth: 64, resizeHeight: 64, resizeQuality: 'low' }).catch(() => null);
-      if (probe) probe.close();
-      const dims = await imageDimensions(file);
-      const scale = Math.min(1, MAX_SIDE / Math.max(dims.w, dims.h));
       const opts = { imageOrientation: 'from-image' };
-      if (scale < 1) { opts.resizeWidth = Math.round(dims.w * scale); opts.resizeHeight = Math.round(dims.h * scale); opts.resizeQuality = 'high'; }
+      if (scale < 1) { opts.resizeWidth = tw; opts.resizeHeight = th; opts.resizeQuality = 'high'; }
       return await createImageBitmap(file, opts);
     } catch {}
   }
   return new Promise((res, rej) => { const img = new Image(); img.onload = () => res(img); img.onerror = rej; img.src = URL.createObjectURL(file); });
+}
+// EXIF orientation (1..8) from a JPEG buffer; 1 when absent. ImageDecoder does not apply it for us.
+function exifOrientation(buf) {
+  const v = new DataView(buf);
+  if (v.getUint16(0) !== 0xFFD8) return 1;
+  let o = 2;
+  while (o + 4 <= v.byteLength) {
+    const marker = v.getUint16(o); const len = v.getUint16(o + 2);
+    if (marker === 0xFFE1 && v.getUint32(o + 4) === 0x45786966) { // "Exif"
+      const t = o + 10; const le = v.getUint16(t) === 0x4949;
+      const ifd = t + v.getUint32(t + 4, le); const n = v.getUint16(ifd, le);
+      for (let i = 0; i < n; i++) { const e = ifd + 2 + i * 12; if (v.getUint16(e, le) === 0x0112) return v.getUint16(e + 8, le) || 1; }
+      return 1;
+    }
+    if ((marker & 0xFF00) !== 0xFF00 || marker === 0xFFDA) break;
+    o += 2 + len;
+  }
+  return 1;
+}
+function applyOrientation(bmp, orientation) {
+  const swap = orientation >= 5;
+  const c = document.createElement('canvas'); c.width = swap ? bmp.height : bmp.width; c.height = swap ? bmp.width : bmp.height;
+  const ctx = c.getContext('2d');
+  switch (orientation) {
+    case 2: ctx.transform(-1, 0, 0, 1, c.width, 0); break;
+    case 3: ctx.transform(-1, 0, 0, -1, c.width, c.height); break;
+    case 4: ctx.transform(1, 0, 0, -1, 0, c.height); break;
+    case 5: ctx.transform(0, 1, 1, 0, 0, 0); break;
+    case 6: ctx.transform(0, 1, -1, 0, c.width, 0); break;
+    case 7: ctx.transform(0, -1, -1, 0, c.width, c.height); break;
+    case 8: ctx.transform(0, -1, 1, 0, 0, c.height); break;
+  }
+  ctx.drawImage(bmp, 0, 0); bmp.close();
+  return c;
 }
 // Read the pixel dimensions without decoding pixels (an <img> element reports naturalWidth after a header-only decode).
 function imageDimensions(file) {
@@ -91,7 +135,7 @@ $('#live-shutter').addEventListener('click', async () => {
   const v = $('#live-video');
   const track = stream && stream.getVideoTracks()[0];
   let source = v;
-  if (track && 'ImageCapture' in window) { try { source = await new ImageCapture(track).takePhoto().then(b => createImageBitmap(b)); } catch {} }
+  if (track && 'ImageCapture' in window) { try { const blob = await new ImageCapture(track).takePhoto(); source = await decodeImage(blob); } catch {} }
   setImage(liveSide, source);
   closeLive();
 });

@@ -120,6 +120,15 @@ test('photo of a rotated card on a dark table is found and rectified', () => {
   writePNG(scene, new URL('./scene.png', import.meta.url).pathname);
 });
 
+test('card on a wooden table with a shadow is found by its edges', () => {
+  const card = makeCard({ seed: 41, borderColor: [190, 190, 195] }); // silver border, like a modern full-art
+  const { scene, corners } = embedInScene(card, { angle: 0.05, persp: 0.0001, wood: true, shadow: true, W: 1500, H: 2000 });
+  const det = detectCardQuad(scene);
+  assert.ok(det && det.confidence > 0.5, `detection failed: ${det && JSON.stringify({ c: det.confidence, m: det.method })}`);
+  for (let i = 0; i < 4; i++) { const d = Math.hypot(det.quad[i].x - corners[i].x, det.quad[i].y - corners[i].y); assert.ok(d < 10, `corner ${i} off by ${d.toFixed(1)} px (${det.method})`); }
+  writePNG(scene, new URL('./out/wood.png', import.meta.url).pathname);
+});
+
 test('landscape photo is rotated to portrait', () => {
   const card = makeCard({ seed: 13 });
   const { scene } = embedInScene(card, { W: 1600, H: 1200, angle: Math.PI / 2 + 0.05, persp: 0 });
