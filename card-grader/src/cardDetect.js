@@ -142,7 +142,7 @@ export function rectifyCard(img, forcedQuad = null) {
   }
   // Shrink the quad by a fraction of a pixel so the background never leaks into the edge band.
   const cx = quad.reduce((s, p) => s + p.x, 0) / 4, cy = quad.reduce((s, p) => s + p.y, 0) / 4;
-  const inset = detected ? 0.004 : 0;
+  const inset = detected ? 0.0015 : 0; // ~1 px: keeps the background out without eating edge whitening
   const q = quad.map(p => ({ x: p.x + (cx - p.x) * inset, y: p.y + (cy - p.y) * inset }));
   const card = warpQuadToRect(img, q, CARD_W, CARD_H);
   return { card, quad, confidence, detected };

@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Offline PWA that photographs a Pokémon TCG card, finds defects and estimates PSA/BGS/CGC/EU grades.",
+  "description": "Offline PWA that photographs a Pok\u00e9mon TCG card, finds defects and estimates PSA/BGS/CGC/EU grades.",
   "scripts": {
     "test": "node test/run.js",
-    "serve": "python3 -m http.server 8080"
+    "serve": "python3 -m http.server 8080",
+    "e2e": "node test/e2e.mjs"
   }
 }

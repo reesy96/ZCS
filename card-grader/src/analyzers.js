@@ -439,6 +439,7 @@ export function analyzeSurface(img, gray, hsv, frame, edgeInfo, side, debug = nu
     const aspect = Math.max(bw, bh) / Math.max(1, Math.min(bw, bh));
     log('dent-cand', 'at', c.cx, c.cy, 'area', c.area, 'aspect', aspect);
     if (c.area > 5000) { log('  reject: too large'); continue; }
+    if ((c.cx < edgeInfo.cornerR || c.cx > w - edgeInfo.cornerR) && (c.cy < edgeInfo.cornerR || c.cy > h - edgeInfo.cornerR)) { log('  reject: corner region (handled by corner analyzer)'); continue; }
     if (aspect > 3.5) { log('  reject: elongated'); continue; }
     if (nearCrease(c.cx, c.cy)) { log('  reject: near crease'); continue; }
     // Printed layout edges (frame line, text box divider) produce relief too: skip blobs hugging the frame.
@@ -461,9 +462,21 @@ export function analyzeSurface(img, gray, hsv, frame, edgeInfo, side, debug = nu
     const severity = clamp01(0.2 + sizeMm / 8 + contrast / 80);
     dents.push({ comp: c, severity, contrast, sizeMm, confidence: glarePenalty * clamp01((onBorder ? 0.5 : 0.3) + contrast / 50) * (onBorder ? 1 : 0.7), onBorder });
   }
+  // Merge the lit/shadow lobes of one dent (and any touching blobs) into a single defect.
+  const merged = [];
+  for (const d of dents) {
+    const c = d.comp;
+    const hit = merged.find(m => c.minX <= m.maxX + 24 && c.maxX >= m.minX - 24 && c.minY <= m.maxY + 24 && c.maxY >= m.minY - 24);
+    if (hit) {
+      hit.minX = Math.min(hit.minX, c.minX); hit.maxX = Math.max(hit.maxX, c.maxX); hit.minY = Math.min(hit.minY, c.minY); hit.maxY = Math.max(hit.maxY, c.maxY);
+      hit.area += c.area; hit.severity = Math.max(hit.severity, d.severity); hit.confidence = Math.max(hit.confidence, d.confidence); hit.contrast = Math.max(hit.contrast, d.contrast);
+      hit.sizeMm = Math.sqrt(hit.area) * MM; hit.onBorder = hit.onBorder || d.onBorder;
+    } else merged.push({ minX: c.minX, maxX: c.maxX, minY: c.minY, maxY: c.maxY, area: c.area, severity: d.severity, confidence: d.confidence, contrast: d.contrast, sizeMm: d.sizeMm, onBorder: d.onBorder });
+  }
+  dents.length = 0; dents.push(...merged);
   dents.sort((a, b) => b.severity - a.severity);
   for (const d of dents.slice(0, 6)) {
-    const c = d.comp;
+    const c = d;
     defects.push({ type: 'dent', severity: d.severity, confidence: d.confidence, side, box: { x: c.minX, y: c.minY, w: c.maxX - c.minX + 1, h: c.maxY - c.minY + 1 },
       note: `${d.onBorder ? 'na okraji' : 'v ploše'}, ~${d.sizeMm.toFixed(1)} mm` });
   }
